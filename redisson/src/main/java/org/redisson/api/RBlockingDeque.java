@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ package org.redisson.api;
 
 import java.util.concurrent.BlockingDeque;
 import java.util.concurrent.TimeUnit;
+import java.util.function.Consumer;
 
 /**
  * {@link BlockingDeque} backed by Redis
@@ -40,7 +41,7 @@ public interface RBlockingDeque<V> extends BlockingDeque<V>, RBlockingQueue<V>, 
      *         specified waiting time elapses before an element is available
      * @throws InterruptedException if interrupted while waiting
      */
-    V pollFirstFromAny(long timeout, TimeUnit unit, String ... queueNames) throws InterruptedException;
+    V pollFirstFromAny(long timeout, TimeUnit unit, String... queueNames) throws InterruptedException;
 
     /**
      * Retrieves and removes first available tail element of <b>any</b> queue,
@@ -56,6 +57,24 @@ public interface RBlockingDeque<V> extends BlockingDeque<V>, RBlockingQueue<V>, 
      *         specified waiting time elapses before an element is available
      * @throws InterruptedException if interrupted while waiting
      */
-    V pollLastFromAny(long timeout, TimeUnit unit, String ... queueNames) throws InterruptedException;
+    V pollLastFromAny(long timeout, TimeUnit unit, String... queueNames) throws InterruptedException;
+
+    /**
+     * Subscribes on first elements appeared in this queue.
+     * Continuously invokes {@link #takeFirstAsync()} method to get a new element.
+     *
+     * @param consumer - queue elements listener
+     * @return listenerId - id of listener
+     */
+    int subscribeOnFirstElements(Consumer<V> consumer);
+
+    /**
+     * Subscribes on last elements appeared in this queue.
+     * Continuously invokes {@link #takeLastAsync()} method to get a new element.
+     *
+     * @param consumer - queue elements listener
+     * @return listenerId - id of listener
+     */
+    int subscribeOnLastElements(Consumer<V> consumer);
 
 }

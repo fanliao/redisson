@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,14 +15,13 @@
  */
 package org.redisson.codec;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.util.Collections;
 import java.util.List;
 import java.util.Queue;
 import java.util.concurrent.ConcurrentLinkedQueue;
 
-import org.redisson.client.codec.Codec;
+import org.redisson.client.codec.BaseCodec;
 import org.redisson.client.handler.State;
 import org.redisson.client.protocol.Decoder;
 import org.redisson.client.protocol.Encoder;
@@ -32,20 +31,26 @@ import com.esotericsoftware.kryo.io.Input;
 import com.esotericsoftware.kryo.io.Output;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.ByteBufInputStream;
+import io.netty.buffer.ByteBufOutputStream;
 
 /**
  * 
  * @author Nikita Koksharov
  *
  */
-public class KryoCodec implements Codec {
+public class KryoCodec extends BaseCodec {
 
     public interface KryoPool {
 
         Kryo get();
 
         void yield(Kryo kryo);
+        
+        ClassLoader getClassLoader();
+        
+        List<Class<?>> getClasses();
 
     }
 
@@ -61,8 +66,8 @@ public class KryoCodec implements Codec {
         }
 
         public Kryo get() {
-            Kryo kryo;
-            if ((kryo = objects.poll()) == null) {
+            Kryo kryo = objects.poll();
+            if (kryo == null) {
                 kryo = createInstance();
             }
             return kryo;
@@ -87,6 +92,15 @@ public class KryoCodec implements Codec {
                 kryo.register(clazz);
             }
             return kryo;
+        }
+
+        public List<Class<?>> getClasses() {
+            return classes;
+        }
+        
+        @Override
+        public ClassLoader getClassLoader() {
+            return classLoader;
         }
 
     }
@@ -126,16 +140,18 @@ public class KryoCodec implements Codec {
     private final Encoder encoder = new Encoder() {
 
         @Override
-        public byte[] encode(Object in) throws IOException {
+        public ByteBuf encode(Object in) throws IOException {
             Kryo kryo = null;
+            ByteBuf out = ByteBufAllocator.DEFAULT.buffer();
             try {
-                ByteArrayOutputStream baos = new ByteArrayOutputStream();
+                ByteBufOutputStream baos = new ByteBufOutputStream(out);
                 Output output = new Output(baos);
                 kryo = kryoPool.get();
                 kryo.writeClassAndObject(output, in);
                 output.close();
-                return baos.toByteArray();
+                return baos.buffer();
             } catch (Exception e) {
+                out.release();
                 if (e instanceof RuntimeException) {
                     throw (RuntimeException) e;
                 }
@@ -156,6 +172,10 @@ public class KryoCodec implements Codec {
         this(Collections.<Class<?>>emptyList(), classLoader);
     }
     
+    public KryoCodec(ClassLoader classLoader, KryoCodec codec) {
+        this(codec.kryoPool.getClasses(), classLoader);
+    }
+    
     public KryoCodec(List<Class<?>> classes) {
         this(classes, null);
     }
@@ -169,26 +189,6 @@ public class KryoCodec implements Codec {
     }
 
     @Override
-    public Decoder<Object> getMapValueDecoder() {
-        return getValueDecoder();
-    }
-
-    @Override
-    public Encoder getMapValueEncoder() {
-        return getValueEncoder();
-    }
-
-    @Override
-    public Decoder<Object> getMapKeyDecoder() {
-        return getValueDecoder();
-    }
-
-    @Override
-    public Encoder getMapKeyEncoder() {
-        return getValueEncoder();
-    }
-
-    @Override
     public Decoder<Object> getValueDecoder() {
         return decoder;
     }
@@ -196,6 +196,14 @@ public class KryoCodec implements Codec {
     @Override
     public Encoder getValueEncoder() {
         return encoder;
+    }
+    
+    @Override
+    public ClassLoader getClassLoader() {
+        if (kryoPool.getClassLoader() != null) {
+            return kryoPool.getClassLoader();
+        }
+        return super.getClassLoader();
     }
 
 }

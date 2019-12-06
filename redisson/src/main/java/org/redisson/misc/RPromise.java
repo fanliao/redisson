@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,9 +16,6 @@
 package org.redisson.misc;
 
 import org.redisson.api.RFuture;
-
-import io.netty.util.concurrent.FutureListener;
-import io.netty.util.concurrent.Promise;
 
 /**
  * 
@@ -59,18 +56,6 @@ public interface RPromise<T> extends RFuture<T> {
     boolean setUncancellable();
 
     @Override
-    RPromise<T> addListener(FutureListener<? super T> listener);
-
-    @Override
-    RPromise<T> addListeners(FutureListener<? super T>... listeners);
-
-    @Override
-    RPromise<T> removeListener(FutureListener<? super T> listener);
-
-    @Override
-    RPromise<T> removeListeners(FutureListener<? super T>... listeners);
-
-    @Override
     RPromise<T> await() throws InterruptedException;
 
     @Override
@@ -82,4 +67,6 @@ public interface RPromise<T> extends RFuture<T> {
     @Override
     RPromise<T> syncUninterruptibly();
 
+    boolean hasListeners();
+    
 }

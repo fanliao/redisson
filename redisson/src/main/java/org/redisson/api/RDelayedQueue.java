@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package org.redisson.api;
 import java.util.concurrent.TimeUnit;
 
 /**
+ * Distributed implementation of delayed queue.
  * 
  * @author Nikita Koksharov
  *
@@ -42,6 +43,7 @@ public interface RDelayedQueue<V> extends RQueue<V>, RDestroyable {
      * @param e the element to add
      * @param delay for transition
      * @param timeUnit for delay
+     * @return void
      */
     RFuture<Void> offerAsync(V e, long delay, TimeUnit timeUnit);
     

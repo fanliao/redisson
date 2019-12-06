@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -50,7 +50,7 @@ public interface RExpirableAsync extends RObjectAsync {
      * Set an expire date for object in async mode. When expire date comes
      * the key will automatically be deleted.
      *
-     * @param timestamp - expire date in seconds (Unix timestamp)
+     * @param timestamp - expire date in milliseconds (Unix timestamp)
      * @return <code>true</code> if the timeout was set and <code>false</code> if not
      */
     RFuture<Boolean> expireAtAsync(long timestamp);
@@ -64,9 +64,11 @@ public interface RExpirableAsync extends RObjectAsync {
     RFuture<Boolean> clearExpireAsync();
 
     /**
-     * Get remaining time to live of object in seconds.
+     * Remaining time to live of Redisson object that has a timeout 
      *
-     * @return <code>-1</code> if object does not exist or time in seconds
+     * @return time in milliseconds
+     *          -2 if the key does not exist.
+     *          -1 if the key exists but has no associated expire.
      */
     RFuture<Long> remainTimeToLiveAsync();
 

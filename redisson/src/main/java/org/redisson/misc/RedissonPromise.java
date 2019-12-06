@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,13 +15,14 @@
  */
 package org.redisson.misc;
 
-import java.util.concurrent.ExecutionException;
+import java.lang.reflect.Field;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
+import java.util.function.BiConsumer;
 
 import org.redisson.api.RFuture;
 
-import io.netty.util.concurrent.FutureListener;
+import io.netty.util.concurrent.DefaultPromise;
 import io.netty.util.concurrent.ImmediateEventExecutor;
 import io.netty.util.concurrent.Promise;
 
@@ -31,10 +32,21 @@ import io.netty.util.concurrent.Promise;
  *
  * @param <T> type of object
  */
-public class RedissonPromise<T> implements RPromise<T> {
+public class RedissonPromise<T> extends CompletableFuture<T> implements RPromise<T> {
+
+    private static final Field LISTENERS_FIELD;
+
+    static {
+        try {
+            LISTENERS_FIELD = DefaultPromise.class.getDeclaredField("listeners");
+            LISTENERS_FIELD.setAccessible(true);
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
 
     private final Promise<T> promise = ImmediateEventExecutor.INSTANCE.newPromise();
-    
+
     public RedissonPromise() {
     }
     
@@ -43,26 +55,35 @@ public class RedissonPromise<T> implements RPromise<T> {
         future.tryFailure(cause);
         return future;
     }
-    
+
     public static <V> RFuture<V> newSucceededFuture(V result) {
         RedissonPromise<V> future = new RedissonPromise<V>();
         future.trySuccess(result);
         return future;
     }
 
-    
-    public Promise<T> getInnerPromise() {
-        return promise;
-    }
-
     @Override
     public boolean isSuccess() {
         return promise.isSuccess();
     }
+    
+    @Override
+    public boolean isDone() {
+        return promise.isDone();
+    }
+    
+    @Override
+    public boolean isCancelled() {
+        return promise.isCancelled();
+    }
 
     @Override
     public boolean trySuccess(T result) {
-        return promise.trySuccess(result);
+        if (promise.trySuccess(result)) {
+            complete(result);
+            return true;
+        }
+        return false;
     }
 
     @Override
@@ -72,36 +93,16 @@ public class RedissonPromise<T> implements RPromise<T> {
 
     @Override
     public boolean tryFailure(Throwable cause) {
-        return promise.tryFailure(cause);
+        if (promise.tryFailure(cause)) {
+            completeExceptionally(cause);
+            return true;
+        }
+        return false;
     }
 
     @Override
     public boolean setUncancellable() {
         return promise.setUncancellable();
-    }
-
-    @Override
-    public RPromise<T> addListener(FutureListener<? super T> listener) {
-        promise.addListener(listener);
-        return this;
-    }
-
-    @Override
-    public RPromise<T> addListeners(FutureListener<? super T>... listeners) {
-        promise.addListeners(listeners);
-        return this;
-    }
-
-    @Override
-    public RPromise<T> removeListener(FutureListener<? super T> listener) {
-        promise.removeListener(listener);
-        return this;
-    }
-
-    @Override
-    public RPromise<T> removeListeners(FutureListener<? super T>... listeners) {
-        promise.removeListeners(listeners);
-        return this;
     }
 
     @Override
@@ -134,33 +135,13 @@ public class RedissonPromise<T> implements RPromise<T> {
     }
 
     @Override
-    public boolean isCancelled() {
-        return promise.isCancelled();
-    }
-
-    @Override
-    public boolean isDone() {
-        return promise.isDone();
-    }
-
-    @Override
     public boolean await(long timeoutMillis) throws InterruptedException {
         return promise.await(timeoutMillis);
     }
 
     @Override
-    public T get() throws InterruptedException, ExecutionException {
-        return promise.get();
-    }
-
-    @Override
     public boolean awaitUninterruptibly(long timeout, TimeUnit unit) {
         return promise.awaitUninterruptibly(timeout, unit);
-    }
-
-    @Override
-    public T get(long timeout, TimeUnit unit) throws InterruptedException, ExecutionException, TimeoutException {
-        return promise.get(timeout, unit);
     }
 
     @Override
@@ -175,7 +156,36 @@ public class RedissonPromise<T> implements RPromise<T> {
 
     @Override
     public boolean cancel(boolean mayInterruptIfRunning) {
-        return promise.cancel(mayInterruptIfRunning);
+        if (promise.cancel(mayInterruptIfRunning)) {
+            return super.cancel(mayInterruptIfRunning);
+        }
+        return false;
     }
-    
+
+    @Override
+    public boolean hasListeners() {
+        try {
+            return LISTENERS_FIELD.get(promise) != null || getNumberOfDependents() > 0;
+        } catch (Exception e) {
+            throw new IllegalStateException(e);
+        }
+    }
+
+    @Override
+    public String toString() {
+        return "RedissonPromise [promise=" + promise + "]";
+    }
+
+    @Override
+    public void onComplete(BiConsumer<? super T, ? super Throwable> action) {
+        promise.addListener(f -> {
+            if (!f.isSuccess()) {
+                action.accept(null, f.cause());
+                return;
+            }
+            
+            action.accept((T) f.getNow(), null);
+        });
+    }
+
 }

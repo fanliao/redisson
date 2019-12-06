@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,9 +15,9 @@
  */
 package org.redisson.api;
 
+import java.util.concurrent.CompletionStage;
 import java.util.concurrent.TimeUnit;
-
-import io.netty.util.concurrent.FutureListener;
+import java.util.function.BiConsumer;
 
 /**
  * Represents the result of an asynchronous computation
@@ -26,7 +26,7 @@ import io.netty.util.concurrent.FutureListener;
  *
  * @param <V> type of value
  */
-public interface RFuture<V> extends java.util.concurrent.Future<V> {
+public interface RFuture<V> extends java.util.concurrent.Future<V>, CompletionStage<V> {
 
     /**
      * Returns {@code true} if and only if the I/O operation was completed
@@ -57,6 +57,17 @@ public interface RFuture<V> extends java.util.concurrent.Future<V> {
     V getNow();
     
     /**
+     * Returns the result value when complete, or throws an
+     * (unchecked) exception if completed exceptionally. To better
+     * conform with the use of common functional forms, if a
+     * computation involved in the completion of this
+     * CompletableFuture threw an exception.
+     *
+     * @return the result value
+     */
+    V join();
+    
+    /**
      * Waits for this future to be completed within the
      * specified time limit.
      *
@@ -83,52 +94,6 @@ public interface RFuture<V> extends java.util.concurrent.Future<V> {
      */
     boolean await(long timeoutMillis) throws InterruptedException;
     
-    /**
-     * Adds the specified listener to this future.  The
-     * specified listener is notified when this future is
-     * {@linkplain #isDone() done}.  If this future is already
-     * completed, the specified listener is notified immediately.
-     * 
-     * @param listener - listener for future object
-     * @return Future object
-     */
-    RFuture<V> addListener(FutureListener<? super V> listener);
-
-    /**
-     * Adds the specified listeners to this future.  The
-     * specified listeners are notified when this future is
-     * {@linkplain #isDone() done}.  If this future is already
-     * completed, the specified listeners are notified immediately.
-     * 
-     * @param listeners - listeners for future object
-     * @return Future object
-     */
-    RFuture<V> addListeners(FutureListener<? super V>... listeners);
-
-    /**
-     * Removes the first occurrence of the specified listener from this future.
-     * The specified listener is no longer notified when this
-     * future is {@linkplain #isDone() done}.  If the specified
-     * listener is not associated with this future, this method
-     * does nothing and returns silently.
-     * 
-     * @param listener - listener for future object
-     * @return Future object
-     */
-    RFuture<V> removeListener(FutureListener<? super V> listener);
-
-    /**
-     * Removes the first occurrence for each of the listeners from this future.
-     * The specified listeners are no longer notified when this
-     * future is {@linkplain #isDone() done}.  If the specified
-     * listeners are not associated with this future, this method
-     * does nothing and returns silently.
-     * 
-     * @param listeners - listeners for future object
-     * @return Future object
-     */
-    RFuture<V> removeListeners(FutureListener<? super V>... listeners);
-
     /**
      * Waits for this future until it is done, and rethrows the cause of the failure if this future
      * failed.
@@ -188,5 +153,6 @@ public interface RFuture<V> extends java.util.concurrent.Future<V> {
      */
     boolean awaitUninterruptibly(long timeoutMillis);
 
+    void onComplete(BiConsumer<? super V, ? super Throwable> action);
     
 }

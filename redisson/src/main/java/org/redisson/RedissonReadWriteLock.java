@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,12 +15,11 @@
  */
 package org.redisson;
 
-import java.util.UUID;
 import java.util.concurrent.locks.Lock;
 
 import org.redisson.api.RLock;
 import org.redisson.api.RReadWriteLock;
-import org.redisson.command.CommandExecutor;
+import org.redisson.command.CommandAsyncExecutor;
 
 /**
  * A {@code ReadWriteLock} maintains a pair of associated {@link
@@ -37,23 +36,18 @@ import org.redisson.command.CommandExecutor;
  */
 public class RedissonReadWriteLock extends RedissonExpirable implements RReadWriteLock {
 
-    private final UUID id;
-    private final CommandExecutor commandExecutor;
-
-    RedissonReadWriteLock(CommandExecutor commandExecutor, String name, UUID id) {
+    public RedissonReadWriteLock(CommandAsyncExecutor commandExecutor, String name) {
         super(commandExecutor, name);
-        this.commandExecutor = commandExecutor;
-        this.id = id;
     }
 
     @Override
     public RLock readLock() {
-        return new RedissonReadLock(commandExecutor, getName(), id);
+        return new RedissonReadLock(commandExecutor, getName());
     }
 
     @Override
     public RLock writeLock() {
-        return new RedissonWriteLock(commandExecutor, getName(), id);
+        return new RedissonWriteLock(commandExecutor, getName());
     }
 
 }

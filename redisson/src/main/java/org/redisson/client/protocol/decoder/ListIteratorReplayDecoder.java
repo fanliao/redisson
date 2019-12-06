@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,15 +18,14 @@ package org.redisson.client.protocol.decoder;
 import java.util.List;
 
 import org.redisson.client.handler.State;
+import org.redisson.client.protocol.Decoder;
 
-import io.netty.buffer.ByteBuf;
-
+/**
+ * 
+ * @author Nikita Koksharov
+ *
+ */
 public class ListIteratorReplayDecoder implements MultiDecoder<ListIteratorResult<Object>> {
-
-    @Override
-    public Object decode(ByteBuf buf, State state) {
-        throw new UnsupportedOperationException();
-    }
 
     @Override
     public ListIteratorResult<Object> decode(List<Object> parts, State state) {
@@ -34,8 +33,8 @@ public class ListIteratorReplayDecoder implements MultiDecoder<ListIteratorResul
     }
 
     @Override
-    public boolean isApplicable(int paramNum, State state) {
-        return false;
+    public Decoder<Object> getDecoder(int paramNum, State state) {
+        return null;
     }
 
 }

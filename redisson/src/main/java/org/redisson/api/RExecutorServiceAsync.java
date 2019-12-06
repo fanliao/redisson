@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,15 +15,50 @@
  */
 package org.redisson.api;
 
+import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.concurrent.TimeUnit;
 
 /**
- * Distributed implementation of {@link java.util.concurrent.ExecutorService}
+ * Distributed async implementation of {@link java.util.concurrent.ExecutorService}
  * 
  * @author Nikita Koksharov
  *
  */
 public interface RExecutorServiceAsync {
+
+    /**
+     * Returns <code>true</code> if this Executor Service has task
+     * by <code>taskId</code> awaiting for execution and/or currently in execution
+     *
+     * @param taskId - id of task
+     * @return <code>true</code> if this Executor Service has task
+     */
+    RFuture<Boolean> hasTaskAsync(String taskId);
+
+    /**
+     * Returns amount of tasks awaiting for execution and/or currently in execution.
+     *
+     * @return amount of tasks
+     */
+    RFuture<Integer> getTaskCountAsync();
+
+    /**
+     * Returns list of task ids awaiting for execution and/or currently in execution.
+     *
+     * @return task ids
+     */
+    RFuture<Set<String>> getTaskIdsAsync();
+
+    /**
+     * Cancel task by id
+     *
+     * @see RExecutorFuture#getTaskId()
+     *
+     * @param taskId - id of task
+     * @return <code>true</code> if task has been canceled successfully
+     */
+    RFuture<Boolean> cancelTaskAsync(String taskId);
 
     /**
      * Deletes executor request queue and state objects
@@ -33,20 +68,66 @@ public interface RExecutorServiceAsync {
     RFuture<Boolean> deleteAsync();
 
     /**
-     * Submit task for execution in async mode with listeners support 
+     * Submits task for execution asynchronously  
      * 
      * @param <T> type of return value
      * @param task - task to execute
      * @return Future object
      */
-    <T> RFuture<T> submitAsync(Callable<T> task);
+    <T> RExecutorFuture<T> submitAsync(Callable<T> task);
 
     /**
-     * Submit task for execution in async mode with listeners support
+     * Submits a value-returning task with defined <code>timeToLive</code> parameter
+     * for execution asynchronously. Returns a Future representing the pending
+     * results of the task. The Future's {@code get} method will return the
+     * task's result upon successful completion.
+     *
+     * @param task the task to submit
+     * @param timeToLive - time to live interval
+     * @param timeUnit - unit of time to live interval
+     * @param <T> the type of the task's result
+     * @return a Future representing pending completion of the task
+     */
+    <T> RExecutorFuture<T> submitAsync(Callable<T> task, long timeToLive, TimeUnit timeUnit);
+
+    /**
+     * Submits tasks batch for execution asynchronously.
+     * All tasks are stored to executor request queue atomically,
+     * if case of any error none of tasks will be added.
+     * 
+     * @param tasks - tasks to execute
+     * @return Future object
+     */
+    RExecutorBatchFuture submitAsync(Callable<?>...tasks);
+    
+    /**
+     * Submits task for execution asynchronously
      * 
      * @param task - task to execute
      * @return Future object
      */
-    RFuture<?> submitAsync(Runnable task);
+    RExecutorFuture<?> submitAsync(Runnable task);
+    
+    /**
+     * Submits a task with defined <code>timeToLive</code> parameter
+     * for execution asynchronously. Returns a Future representing task completion.
+     * The Future's {@code get} method will return the
+     * task's result upon successful completion.
+     *
+     * @param task the task to submit
+     * @param timeToLive - time to live interval
+     * @param timeUnit - unit of time to live interval
+     * @return a Future representing pending completion of the task
+     */
+    RExecutorFuture<?> submitAsync(Runnable task, long timeToLive, TimeUnit timeUnit);
+
+    /**
+     * Submits tasks batch for execution asynchronously. All tasks are stored to executor request queue atomically, 
+     * if case of any error none of tasks will be added.
+     * 
+     * @param tasks - tasks to execute
+     * @return Future object
+     */
+    RExecutorBatchFuture submitAsync(Runnable...tasks);
     
 }

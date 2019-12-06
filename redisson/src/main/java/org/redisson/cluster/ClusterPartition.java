@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,30 +15,58 @@
  */
 package org.redisson.cluster;
 
-import java.net.InetSocketAddress;
-import java.net.URI;
+import java.util.BitSet;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.Set;
 
-import org.redisson.misc.URIBuilder;
+import org.redisson.misc.RedisURI;
 
+import static org.redisson.connection.MasterSlaveConnectionManager.MAX_SLOT;
+
+/**
+ * 
+ * @author Nikita Koksharov
+ *
+ */
 public class ClusterPartition {
 
+    public enum Type {MASTER, SLAVE}
+    
+    private Type type = Type.MASTER;
+    
     private final String nodeId;
     private boolean masterFail;
-    private URI masterAddress;
-    private final Set<URI> slaveAddresses = new HashSet<URI>();
-    private final Set<URI> failedSlaves = new HashSet<URI>();
+    private RedisURI masterAddress;
+    private final Set<RedisURI> slaveAddresses = new HashSet<>();
+    private final Set<RedisURI> failedSlaves = new HashSet<>();
     
-    private final Set<Integer> slots = new HashSet<Integer>();
+    private final BitSet slots = new BitSet(MAX_SLOT);
     private final Set<ClusterSlotRange> slotRanges = new HashSet<ClusterSlotRange>();
 
+    private ClusterPartition parent;
+    
     public ClusterPartition(String nodeId) {
         super();
         this.nodeId = nodeId;
     }
+    
+    public ClusterPartition getParent() {
+        return parent;
+    }
 
+    public void setParent(ClusterPartition parent) {
+        this.parent = parent;
+    }
+
+    public void setType(Type type) {
+        this.type = type;
+    }
+    
+    public Type getType() {
+        return type;
+    }
+    
     public String getNodeId() {
         return nodeId;
     }
@@ -50,73 +78,80 @@ public class ClusterPartition {
         return masterFail;
     }
 
-    public void addSlots(Set<Integer> slots) {
-        this.slots.addAll(slots);
+    public void addSlots(BitSet slots) {
+        this.slots.or(slots);
     }
 
-    public void removeSlots(Set<Integer> slots) {
-        this.slots.removeAll(slots);
+    public void removeSlots(BitSet slots) {
+        this.slots.andNot(slots);
     }
 
     public void addSlotRanges(Set<ClusterSlotRange> ranges) {
         for (ClusterSlotRange clusterSlotRange : ranges) {
-            for (int i = clusterSlotRange.getStartSlot(); i < clusterSlotRange.getEndSlot() + 1; i++) {
-                slots.add(i);
-            }
+            slots.set(clusterSlotRange.getStartSlot(), clusterSlotRange.getEndSlot() + 1);
         }
         slotRanges.addAll(ranges);
     }
     public void removeSlotRanges(Set<ClusterSlotRange> ranges) {
         for (ClusterSlotRange clusterSlotRange : ranges) {
-            for (int i = clusterSlotRange.getStartSlot(); i < clusterSlotRange.getEndSlot() + 1; i++) {
-                slots.remove(i);
-            }
+            slots.clear(clusterSlotRange.getStartSlot(), clusterSlotRange.getEndSlot() + 1);
         }
         slotRanges.removeAll(ranges);
     }
     public Set<ClusterSlotRange> getSlotRanges() {
         return slotRanges;
     }
-    public Set<Integer> getSlots() {
+    
+    public Iterable<Integer> getSlots() {
+        return slots.stream()::iterator;
+    }
+    
+    public BitSet slots() {
         return slots;
     }
-
-    public InetSocketAddress getMasterAddr() {
-        return new InetSocketAddress(masterAddress.getHost(), masterAddress.getPort());
+    
+    public BitSet copySlots() {
+        return (BitSet) slots.clone();
+    }
+    
+    public boolean hasSlot(int slot) {
+        return slots.get(slot);
+    }
+    
+    public int getSlotsAmount() {
+        return slots.cardinality();
     }
 
-    public URI getMasterAddress() {
+    public RedisURI getMasterAddress() {
         return masterAddress;
     }
-    public void setMasterAddress(String masterAddress) {
-        setMasterAddress(URIBuilder.create(masterAddress));
-    }
-    public void setMasterAddress(URI masterAddress) {
+    public void setMasterAddress(RedisURI masterAddress) {
         this.masterAddress = masterAddress;
     }
 
-    public void addFailedSlaveAddress(URI address) {
+    public void addFailedSlaveAddress(RedisURI address) {
         failedSlaves.add(address);
     }
-    public Set<URI> getFailedSlaveAddresses() {
+    public Set<RedisURI> getFailedSlaveAddresses() {
         return Collections.unmodifiableSet(failedSlaves);
     }
-    public void removeFailedSlaveAddress(URI uri) {
+    public void removeFailedSlaveAddress(RedisURI uri) {
         failedSlaves.remove(uri);
     }
 
-    public void addSlaveAddress(URI address) {
+    public void addSlaveAddress(RedisURI address) {
         slaveAddresses.add(address);
     }
-    public Set<URI> getSlaveAddresses() {
+    public Set<RedisURI> getSlaveAddresses() {
         return Collections.unmodifiableSet(slaveAddresses);
     }
-    public void removeSlaveAddress(URI uri) {
+    public void removeSlaveAddress(RedisURI uri) {
         slaveAddresses.remove(uri);
         failedSlaves.remove(uri);
     }
     
     @Override
+    @SuppressWarnings("AvoidInlineConditionals")
     public int hashCode() {
         final int prime = 31;
         int result = 1;

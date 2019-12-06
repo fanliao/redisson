@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -42,6 +42,7 @@ import org.redisson.jcache.bean.EmptyStatisticsMXBean;
 import org.redisson.jcache.bean.JCacheManagementMXBean;
 import org.redisson.jcache.bean.JCacheStatisticsMXBean;
 import org.redisson.jcache.configuration.JCacheConfiguration;
+import org.redisson.jcache.configuration.RedissonConfiguration;
 
 /**
  * 
@@ -65,7 +66,7 @@ public class JCacheManager implements CacheManager {
     
     private final Redisson redisson;
     
-    public JCacheManager(Redisson redisson, ClassLoader classLoader, CachingProvider cacheProvider, Properties properties, URI uri) {
+    JCacheManager(Redisson redisson, ClassLoader classLoader, CachingProvider cacheProvider, Properties properties, URI uri) {
         super();
         this.classLoader = classLoader;
         this.cacheProvider = cacheProvider;
@@ -104,6 +105,8 @@ public class JCacheManager implements CacheManager {
     public <K, V, C extends Configuration<K, V>> Cache<K, V> createCache(String cacheName, C configuration)
             throws IllegalArgumentException {
         checkNotClosed();
+        Redisson cacheRedisson = redisson;
+        
         if (cacheName == null) {
             throw new NullPointerException();
         }
@@ -111,8 +114,23 @@ public class JCacheManager implements CacheManager {
             throw new NullPointerException();
         }
         
+        if (cacheRedisson == null && !(configuration instanceof RedissonConfiguration)) {
+            throw new IllegalStateException("Default configuration hasn't been specified!");
+        }
+        
+        boolean hasOwnRedisson = false;
+        if (configuration instanceof RedissonConfiguration) {
+            RedissonConfiguration<K, V> rc = (RedissonConfiguration<K, V>) configuration;
+            if (rc.getConfig() != null) {
+                cacheRedisson = (Redisson) Redisson.create(rc.getConfig());
+                hasOwnRedisson = true;
+            } else {
+                cacheRedisson = (Redisson) rc.getRedisson();
+            }
+        }
+        
         JCacheConfiguration<K, V> cfg = new JCacheConfiguration<K, V>(configuration);
-        JCache<K, V> cache = new JCache<K, V>(this, redisson, cacheName, cfg);
+        JCache<K, V> cache = new JCache<K, V>(this, cacheRedisson, cacheName, cfg, hasOwnRedisson);
         JCache<?, ?> oldCache = caches.putIfAbsent(cacheName, cache);
         if (oldCache != null) {
             throw new CacheException("Cache " + cacheName + " already exists");
@@ -215,9 +233,9 @@ public class JCacheManager implements CacheManager {
                 }
             }
             try {
-                ObjectName name = new ObjectName(getName("Management", cache));
-                if (mBeanServer.queryNames(name, null).isEmpty()) {
-                    mBeanServer.registerMBean(statBean, name);
+                ObjectName objectName = queryNames("Configuration", cache);
+                if (mBeanServer.queryNames(objectName, null).isEmpty()) {
+                    mBeanServer.registerMBean(statBean, objectName);
                 }
             } catch (MalformedObjectNameException e) {
                 throw new CacheException(e);
@@ -234,11 +252,16 @@ public class JCacheManager implements CacheManager {
         cache.getConfiguration(JCacheConfiguration.class).setManagementEnabled(enabled);
     }
 
+    private ObjectName queryNames(String baseName, JCache<?, ?> cache) throws MalformedObjectNameException {
+        String name = getName(baseName, cache);
+        return new ObjectName(name);
+    }
+
     private void unregisterManagementBean(JCache<?, ?> cache) {
         JCacheManagementMXBean statBean = managementBeans.remove(cache);
         if (statBean != null) {
             try {
-                ObjectName name = new ObjectName(getName("Management", cache));
+                ObjectName name = queryNames("Configuration", cache);
                 for (ObjectName objectName : mBeanServer.queryNames(name, null)) {
                     mBeanServer.unregisterMBean(objectName);
                 }
@@ -288,9 +311,9 @@ public class JCacheManager implements CacheManager {
                 }
             }
             try {
-                ObjectName name = new ObjectName(getName("Statistics", cache));
-                if (!mBeanServer.isRegistered(name)) {
-                    mBeanServer.registerMBean(statBean, name);
+                ObjectName objectName = queryNames("Statistics", cache);
+                if (!mBeanServer.isRegistered(objectName)) {
+                    mBeanServer.registerMBean(statBean, objectName);
                 }
             } catch (MalformedObjectNameException e) {
                 throw new CacheException(e);
@@ -311,7 +334,7 @@ public class JCacheManager implements CacheManager {
         JCacheStatisticsMXBean statBean = statBeans.remove(cache);
         if (statBean != null) {
             try {
-                ObjectName name = new ObjectName(getName("Statistics", cache));
+                ObjectName name = queryNames("Statistics", cache);
                 for (ObjectName objectName : mBeanServer.queryNames(name, null)) {
                     mBeanServer.unregisterMBean(objectName);
                 }
@@ -341,7 +364,9 @@ public class JCacheManager implements CacheManager {
                         // skip
                     }
                 }
-                redisson.shutdown();
+                if (redisson != null) {
+                    redisson.shutdown();
+                }
                 closed = true;
             }
         }

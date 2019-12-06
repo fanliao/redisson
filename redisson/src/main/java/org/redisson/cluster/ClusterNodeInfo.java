@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,11 +15,11 @@
  */
 package org.redisson.cluster;
 
-import java.net.URI;
+import java.util.EnumSet;
 import java.util.HashSet;
 import java.util.Set;
 
-import org.redisson.misc.URIBuilder;
+import org.redisson.misc.RedisURI;
 
 /**
  * 
@@ -33,8 +33,8 @@ public class ClusterNodeInfo {
     private final String nodeInfo;
     
     private String nodeId;
-    private URI address;
-    private final Set<Flag> flags = new HashSet<Flag>();
+    private RedisURI address;
+    private final Set<Flag> flags = EnumSet.noneOf(Flag.class);
     private String slaveOf;
 
     private final Set<ClusterSlotRange> slotRanges = new HashSet<ClusterSlotRange>();
@@ -50,11 +50,11 @@ public class ClusterNodeInfo {
         this.nodeId = nodeId;
     }
 
-    public URI getAddress() {
+    public RedisURI getAddress() {
         return address;
     }
     public void setAddress(String address) {
-        this.address = URIBuilder.create(address);
+        this.address = new RedisURI(address);
     }
 
     public void addSlotRange(ClusterSlotRange range) {

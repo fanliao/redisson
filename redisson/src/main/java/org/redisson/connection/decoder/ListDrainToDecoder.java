@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,9 +19,8 @@ import java.util.Collection;
 import java.util.List;
 
 import org.redisson.client.handler.State;
+import org.redisson.client.protocol.Decoder;
 import org.redisson.client.protocol.decoder.MultiDecoder;
-
-import io.netty.buffer.ByteBuf;
 
 public class ListDrainToDecoder<V> implements MultiDecoder<Integer> {
 
@@ -32,19 +31,14 @@ public class ListDrainToDecoder<V> implements MultiDecoder<Integer> {
     }
 
     @Override
-    public Object decode(ByteBuf buf, State state) {
-        throw new UnsupportedOperationException();
-    }
-
-    @Override
     public Integer decode(List<Object> parts, State state) {
         list.addAll(parts);
         return parts.size();
     }
 
     @Override
-    public boolean isApplicable(int paramNum, State state) {
-        return false;
+    public Decoder<Object> getDecoder(int paramNum, State state) {
+        return null;
     }
 
 }

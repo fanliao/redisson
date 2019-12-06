@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,27 +16,25 @@
 package org.redisson.executor;
 
 import org.redisson.api.RFuture;
-import org.redisson.misc.PromiseDelegator;
-import org.redisson.misc.RPromise;
+import org.redisson.misc.RedissonPromise;
+import org.redisson.remote.RequestId;
 
 /**
  * 
  * @author Nikita Koksharov
  *
  */
-public class RemotePromise<T> extends PromiseDelegator<T> {
+public class RemotePromise<T> extends RedissonPromise<T> {
 
-    private String requestId;
+    private final RequestId requestId;
     private RFuture<Boolean> addFuture;
     
-    public RemotePromise(RPromise<T> promise) {
-        super(promise);
-    }
-    
-    public void setRequestId(String requestId) {
+    public RemotePromise(RequestId requestId) {
+        super();
         this.requestId = requestId;
     }
-    public String getRequestId() {
+    
+    public RequestId getRequestId() {
         return requestId;
     }
     

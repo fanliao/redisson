@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,16 +15,14 @@
  */
 package org.redisson.spring.cache;
 
-import java.io.IOException;
 import java.lang.reflect.Constructor;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.redisson.api.RLock;
 import org.redisson.api.RMap;
 import org.redisson.api.RMapCache;
-import org.redisson.api.RedissonClient;
-import org.redisson.misc.Hash;
 import org.springframework.cache.Cache;
 import org.springframework.cache.support.SimpleValueWrapper;
 
@@ -41,18 +39,23 @@ public class RedissonCache implements Cache {
 
     private CacheConfig config;
     
-    private final RedissonClient redisson;
+    private final boolean allowNullValues;
+    
+    private final AtomicLong hits = new AtomicLong();
 
-    public RedissonCache(RedissonClient redisson, RMapCache<Object, Object> mapCache, CacheConfig config) {
+    private final AtomicLong puts = new AtomicLong();
+    
+    private final AtomicLong misses = new AtomicLong();
+    
+    public RedissonCache(RMapCache<Object, Object> mapCache, CacheConfig config, boolean allowNullValues) {
+        this(mapCache, allowNullValues);
         this.mapCache = mapCache;
-        this.map = mapCache;
         this.config = config;
-        this.redisson = redisson;
     }
 
-    public RedissonCache(RedissonClient redisson, RMap<Object, Object> map) {
+    public RedissonCache(RMap<Object, Object> map, boolean allowNullValues) {
         this.map = map;
-        this.redisson = redisson;
+        this.allowNullValues = allowNullValues;
     }
 
     @Override
@@ -68,12 +71,20 @@ public class RedissonCache implements Cache {
     @Override
     public ValueWrapper get(Object key) {
         Object value = map.get(key);
+        if (value == null) {
+            addCacheMiss();
+        } else {
+            addCacheHit();
+        }
         return toValueWrapper(value);
     }
 
     public <T> T get(Object key, Class<T> type) {
         Object value = map.get(key);
-        if (value != null) {
+        if (value == null) {
+            addCacheMiss();
+        } else {
+            addCacheHit();
             if (value.getClass().getName().equals(NullValue.class.getName())) {
                 return null;
             }
@@ -81,25 +92,41 @@ public class RedissonCache implements Cache {
                 throw new IllegalStateException("Cached value is not of required type [" + type.getName() + "]: " + value);
             }
         }
-        return (T) value;
+        return (T) fromStoreValue(value);
     }
 
     @Override
     public void put(Object key, Object value) {
+        if (!allowNullValues && value == null) {
+            map.remove(key);
+            return;
+        }
+        
+        value = toStoreValue(value);
         if (mapCache != null) {
             mapCache.fastPut(key, value, config.getTTL(), TimeUnit.MILLISECONDS, config.getMaxIdleTime(), TimeUnit.MILLISECONDS);
         } else {
             map.fastPut(key, value);
         }
+        addCachePut();
     }
 
     public ValueWrapper putIfAbsent(Object key, Object value) {
         Object prevValue;
-        if (mapCache != null) {
-            prevValue = mapCache.putIfAbsent(key, value, config.getTTL(), TimeUnit.MILLISECONDS, config.getMaxIdleTime(), TimeUnit.MILLISECONDS);
+        if (!allowNullValues && value == null) {
+            prevValue = map.get(key);
         } else {
-            prevValue = map.putIfAbsent(key, value);
+            value = toStoreValue(value);
+            if (mapCache != null) {
+                prevValue = mapCache.putIfAbsent(key, value, config.getTTL(), TimeUnit.MILLISECONDS, config.getMaxIdleTime(), TimeUnit.MILLISECONDS);
+            } else {
+                prevValue = map.putIfAbsent(key, value);
+            }
+            if (prevValue == null) {
+                addCachePut();
+            }
         }
+        
         return toValueWrapper(prevValue);
     }
 
@@ -126,45 +153,44 @@ public class RedissonCache implements Cache {
     public <T> T get(Object key, Callable<T> valueLoader) {
         Object value = map.get(key);
         if (value == null) {
-            String lockName = getLockName(key);
-            RLock lock = redisson.getLock(lockName);
+            addCacheMiss();
+            RLock lock = map.getLock(key);
             lock.lock();
             try {
                 value = map.get(key);
                 if (value == null) {
-                    try {
-                        value = toStoreValue(valueLoader.call());
-                    } catch (Exception ex) {
-                        try {
-                            Class<?> c = Class.forName("org.springframework.cache.Cache$ValueRetrievalException");
-                            Constructor<?> constructor = c.getConstructor(Object.class, Callable.class, Throwable.class);
-                            RuntimeException exception = (RuntimeException) constructor.newInstance(key, valueLoader, ex.getCause());
-                            throw exception;                
-                        } catch (Exception e) {
-                            throw new IllegalStateException(e);
-                        }
-                    }
-                    map.put(key, value);
+                    value = putValue(key, valueLoader, value);
                 }
             } finally {
                 lock.unlock();
             }
+        } else {
+            addCacheHit();
         }
         
         return (T) fromStoreValue(value);
     }
 
-    private String getLockName(Object key) {
+    private <T> Object putValue(Object key, Callable<T> valueLoader, Object value) {
         try {
-            byte[] keyState = redisson.getConfig().getCodec().getMapKeyEncoder().encode(key);
-            return "{" + map.getName() + "}:" + Hash.hashToBase64(keyState) + ":key";
-        } catch (IOException e) {
-            throw new IllegalStateException(e);
+            value = valueLoader.call();
+        } catch (Exception ex) {
+            RuntimeException exception;
+            try {
+                Class<?> c = Class.forName("org.springframework.cache.Cache$ValueRetrievalException");
+                Constructor<?> constructor = c.getConstructor(Object.class, Callable.class, Throwable.class);
+                exception = (RuntimeException) constructor.newInstance(key, valueLoader, ex);
+            } catch (Exception e) {
+                throw new IllegalStateException(e);
+            }
+            throw exception;
         }
+        put(key, value);
+        return value;
     }
 
     protected Object fromStoreValue(Object storeValue) {
-        if (storeValue == NullValue.INSTANCE) {
+        if (storeValue instanceof NullValue) {
             return null;
         }
         return storeValue;
@@ -175,6 +201,36 @@ public class RedissonCache implements Cache {
             return NullValue.INSTANCE;
         }
         return userValue;
+    }
+
+    /** The number of get requests that were satisfied by the cache.
+     * @return the number of hits
+     */
+    long getCacheHits(){
+        return hits.get();
+    }
+
+    /** A miss is a get request that is not satisfied.
+     * @return the number of misses
+     */
+    long getCacheMisses(){
+        return misses.get();
+    }
+    
+    long getCachePuts() {
+        return puts.get();
+    }
+    
+    private void addCachePut() {
+        puts.incrementAndGet();
+    }
+
+    private void addCacheHit(){
+        hits.incrementAndGet();
+    }
+
+    private void addCacheMiss(){
+        misses.incrementAndGet();
     }
 
 }

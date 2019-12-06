@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,9 +23,8 @@ import org.redisson.client.protocol.pubsub.PubSubType;
  *
  * @author Nikita Koksharov
  *
- * @param <V> value
  */
-public class PubSubPatternStatusListener<V> implements RedisPubSubListener<V> {
+public class PubSubPatternStatusListener implements RedisPubSubListener<Object> {
 
     private final PatternStatusListener listener;
     private final String name;
@@ -41,6 +40,7 @@ public class PubSubPatternStatusListener<V> implements RedisPubSubListener<V> {
     }
 
     @Override
+    @SuppressWarnings("AvoidInlineConditionals")
     public int hashCode() {
         final int prime = 31;
         int result = 1;
@@ -66,21 +66,24 @@ public class PubSubPatternStatusListener<V> implements RedisPubSubListener<V> {
     }
 
     @Override
-    public void onMessage(String channel, V message) {
+    public void onMessage(CharSequence channel, Object message) {
     }
 
     @Override
-    public void onPatternMessage(String pattern, String channel, V message) {
+    public void onPatternMessage(CharSequence pattern, CharSequence channel, Object message) {
     }
 
     @Override
-    public boolean onStatus(PubSubType type, String channel) {
-        if (type == PubSubType.PSUBSCRIBE) {
-            listener.onPSubscribe(channel);
-        } else if (type == PubSubType.PUNSUBSCRIBE) {
-            listener.onPUnsubscribe(channel);
+    public boolean onStatus(PubSubType type, CharSequence channel) {
+        if (channel.toString().equals(name)) {
+            if (type == PubSubType.PSUBSCRIBE) {
+                listener.onPSubscribe(channel.toString());
+            } else if (type == PubSubType.PUNSUBSCRIBE) {
+                listener.onPUnsubscribe(channel.toString());
+            }
+            return true;
         }
-        return true;
+        return false;
     }
 
 }

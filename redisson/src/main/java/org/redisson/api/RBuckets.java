@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,28 +15,16 @@
  */
 package org.redisson.api;
 
-import java.util.List;
 import java.util.Map;
 
-public interface RBuckets {
+/**
+ * Operations over multiple Bucket objects.
+ * 
+ * @author Nikita Koksharov
+ *
+ */
+public interface RBuckets extends RBucketsAsync {
 
-    /**
-     * <p>Returns a list of object holder instances by a key pattern.
-     *
-     * <pre>Supported glob-style patterns:
-     *    h?llo subscribes to hello, hallo and hxllo
-     *    h*llo subscribes to hllo and heeeello
-     *    h[ae]llo subscribes to hello and hallo, but not hillo
-     *    h[^e]llo matches hallo, hbllo, ... but not hello
-     *    h[a-b]llo matches hallo and hbllo</pre>
-     * <p>Use \ to escape special characters if you want to match them verbatim.
-     * 
-     * @param <V> type of value
-     * @param pattern - pattern of key
-     * @return List of bucket objects
-     */
-    <V> List<RBucket<V>> find(String pattern);
-    
     /**
      * Returns Redis object mapped by key. Result Map is not contains
      * key-value entry for null values.
@@ -45,7 +33,7 @@ public interface RBuckets {
      * @param keys - keys
      * @return Map with name of bucket as key and bucket as value
      */
-    <V> Map<String, V> get(String ... keys);
+    <V> Map<String, V> get(String... keys);
 
     /**
      * Try to save objects mapped by Redis key.
@@ -63,5 +51,13 @@ public interface RBuckets {
      * @param buckets - map of buckets
      */
     void set(Map<String, ?> buckets);
+    
+    /**
+     * Delete multiple objects by name
+     *
+     * @param keys - object names
+     * @return number of removed keys
+     */
+    long delete(String... keys);
     
 }

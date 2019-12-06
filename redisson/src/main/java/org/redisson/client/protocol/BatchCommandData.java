@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,7 +19,9 @@ import java.util.concurrent.atomic.AtomicReference;
 
 import org.redisson.client.RedisRedirectException;
 import org.redisson.client.codec.Codec;
+import org.redisson.client.codec.StringCodec;
 import org.redisson.misc.RPromise;
+import org.redisson.misc.RedissonPromise;
 
 /**
  * 
@@ -32,6 +34,10 @@ public class BatchCommandData<T, R> extends CommandData<T, R> implements Compara
 
     private final int index;
     private final AtomicReference<RedisRedirectException> redirectError = new AtomicReference<RedisRedirectException>();
+    
+    public BatchCommandData(RedisCommand<T> command, Object[] params, int index) {
+        this(new RedissonPromise<R>(), StringCodec.INSTANCE, command, params, index);
+    }
     
     public BatchCommandData(RPromise<R> promise, Codec codec, RedisCommand<T> command, Object[] params, int index) {
         super(promise, codec, command, params);

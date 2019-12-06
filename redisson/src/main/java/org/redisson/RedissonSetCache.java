@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
  */
 package org.redisson;
 
-import java.net.InetSocketAddress;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collection;
@@ -24,17 +23,27 @@ import java.util.Iterator;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
+import java.util.stream.Stream;
 
+import org.redisson.api.RCountDownLatch;
 import org.redisson.api.RFuture;
+import org.redisson.api.RLock;
+import org.redisson.api.RPermitExpirableSemaphore;
+import org.redisson.api.RReadWriteLock;
+import org.redisson.api.RSemaphore;
 import org.redisson.api.RSetCache;
+import org.redisson.api.RedissonClient;
+import org.redisson.api.mapreduce.RCollectionMapReduce;
+import org.redisson.client.RedisClient;
 import org.redisson.client.codec.Codec;
-import org.redisson.client.protocol.RedisCommand;
-import org.redisson.client.protocol.RedisCommand.ValueType;
 import org.redisson.client.protocol.RedisCommands;
-import org.redisson.client.protocol.RedisStrictCommand;
-import org.redisson.client.protocol.convertor.BooleanReplayConvertor;
 import org.redisson.client.protocol.decoder.ListScanResult;
 import org.redisson.command.CommandAsyncExecutor;
+import org.redisson.eviction.EvictionScheduler;
+import org.redisson.mapreduce.RedissonCollectionMapReduce;
+import org.redisson.misc.RedissonPromise;
+
+import io.netty.buffer.ByteBuf;
 
 /**
  * <p>Set-based cache with ability to set TTL for each entry via
@@ -45,7 +54,7 @@ import org.redisson.command.CommandAsyncExecutor;
  * Thus values are checked for TTL expiration during any value read operation.
  * If entry expired then it doesn't returns and clean task runs asynchronous.
  * Clean task deletes removes 100 expired entries at once.
- * In addition there is {@link org.redisson.EvictionScheduler}. This scheduler
+ * In addition there is {@link org.redisson.eviction.EvictionScheduler}. This scheduler
  * deletes expired entries in time interval between 5 seconds to 2 hours.</p>
  *
  * <p>If eviction is not required then it's better to use {@link org.redisson.api.RSet}.</p>
@@ -54,16 +63,32 @@ import org.redisson.command.CommandAsyncExecutor;
  *
  * @param <V> value
  */
-public class RedissonSetCache<V> extends RedissonExpirable implements RSetCache<V> {
+public class RedissonSetCache<V> extends RedissonExpirable implements RSetCache<V>, ScanIterator {
 
-    public RedissonSetCache(EvictionScheduler evictionScheduler, CommandAsyncExecutor commandExecutor, String name) {
+    RedissonClient redisson;
+    EvictionScheduler evictionScheduler;
+    
+    public RedissonSetCache(EvictionScheduler evictionScheduler, CommandAsyncExecutor commandExecutor, String name, RedissonClient redisson) {
         super(commandExecutor, name);
-        evictionScheduler.schedule(getName());
+        if (evictionScheduler != null) {
+            evictionScheduler.schedule(getName(), 0);
+        }
+        this.evictionScheduler = evictionScheduler;
+        this.redisson = redisson;
     }
 
-    public RedissonSetCache(Codec codec, EvictionScheduler evictionScheduler, CommandAsyncExecutor commandExecutor, String name) {
+    public RedissonSetCache(Codec codec, EvictionScheduler evictionScheduler, CommandAsyncExecutor commandExecutor, String name, RedissonClient redisson) {
         super(codec, commandExecutor, name);
-        evictionScheduler.schedule(getName());
+        if (evictionScheduler != null) {
+            evictionScheduler.schedule(getName(), 0);
+        }
+        this.evictionScheduler = evictionScheduler;
+        this.redisson = redisson;
+    }
+    
+    @Override
+    public <KOut, VOut> RCollectionMapReduce<V, KOut, VOut> mapReduce() {
+        return new RedissonCollectionMapReduce<V, KOut, VOut>(this, redisson, commandExecutor.getConnectionManager());
     }
 
     @Override
@@ -88,7 +113,7 @@ public class RedissonSetCache<V> extends RedissonExpirable implements RSetCache<
 
     @Override
     public RFuture<Boolean> containsAsync(Object o) {
-        return commandExecutor.evalReadAsync(getName(), codec, new RedisStrictCommand<Boolean>("EVAL", new BooleanReplayConvertor(), 5),
+        return commandExecutor.evalReadAsync(getName(o), codec, RedisCommands.EVAL_BOOLEAN,
                     "local expireDateScore = redis.call('zscore', KEYS[1], ARGV[2]); " + 
                      "if expireDateScore ~= false then " +
                          "if tonumber(expireDateScore) <= tonumber(ARGV[1]) then " +
@@ -99,18 +124,33 @@ public class RedissonSetCache<V> extends RedissonExpirable implements RSetCache<
                      "else " +
                          "return 0;" +
                      "end; ",
-               Arrays.<Object>asList(getName()), System.currentTimeMillis(), o);
+               Arrays.<Object>asList(getName(o)), System.currentTimeMillis(), encode(o));
     }
 
-    ListScanResult<V> scanIterator(InetSocketAddress client, long startPos) {
-        RFuture<ListScanResult<V>> f = scanIteratorAsync(client, startPos);
+    @Override
+    public ListScanResult<Object> scanIterator(String name, RedisClient client, long startPos, String pattern, int count) {
+        RFuture<ListScanResult<Object>> f = scanIteratorAsync(name, client, startPos, pattern, count);
         return get(f);
     }
 
-    public RFuture<ListScanResult<V>> scanIteratorAsync(InetSocketAddress client, long startPos) {
-        return commandExecutor.evalReadAsync(client, getName(), codec, RedisCommands.EVAL_ZSCAN,
+    @Override
+    public RFuture<ListScanResult<Object>> scanIteratorAsync(String name, RedisClient client, long startPos, String pattern, int count) {
+        List<Object> params = new ArrayList<Object>();
+        params.add(startPos);
+        params.add(System.currentTimeMillis());
+        if (pattern != null) {
+            params.add(pattern);
+        }
+        params.add(count);
+        
+        return commandExecutor.evalReadAsync(client, name, codec, RedisCommands.EVAL_ZSCAN,
                   "local result = {}; "
-                + "local res = redis.call('zscan', KEYS[1], ARGV[1]); "
+                + "local res; "
+                + "if (#ARGV == 4) then "
+                  + " res = redis.call('zscan', KEYS[1], ARGV[1], 'match', ARGV[3], 'count', ARGV[4]); "
+                + "else "
+                  + " res = redis.call('zscan', KEYS[1], ARGV[1], 'count', ARGV[3]); "
+                + "end;"
                 + "for i, value in ipairs(res[2]) do "
                     + "if i % 2 == 0 then "
                         + "local expireDate = value; "
@@ -119,24 +159,39 @@ public class RedissonSetCache<V> extends RedissonExpirable implements RSetCache<
                         + "end; "
                     + "end;"
                 + "end;"
-                + "return {res[1], result};", Arrays.<Object>asList(getName()), startPos, System.currentTimeMillis());
+                + "return {res[1], result};", Arrays.<Object>asList(name), params.toArray());
     }
 
     @Override
-    public Iterator<V> iterator() {
+    public Iterator<V> iterator(int count) {
+        return iterator(null, count);
+    }
+    
+    @Override
+    public Iterator<V> iterator(String pattern) {
+        return iterator(pattern, 10);
+    }
+    
+    @Override
+    public Iterator<V> iterator(final String pattern, final int count) {
         return new RedissonBaseIterator<V>() {
 
             @Override
-            ListScanResult<V> iterator(InetSocketAddress client, long nextIterPos) {
-                return scanIterator(client, nextIterPos);
+            protected ListScanResult<Object> iterator(RedisClient client, long nextIterPos) {
+                return scanIterator(getName(), client, nextIterPos, pattern, count);
             }
 
             @Override
-            void remove(V value) {
-                RedissonSetCache.this.remove(value);
+            protected void remove(Object value) {
+                RedissonSetCache.this.remove((V) value);
             }
             
         };
+    }
+    
+    @Override
+    public Iterator<V> iterator() {
+        return iterator(null);
     }
 
     @Override
@@ -146,27 +201,18 @@ public class RedissonSetCache<V> extends RedissonExpirable implements RSetCache<
 
     @Override
     public RFuture<Set<V>> readAllAsync() {
-        return (RFuture<Set<V>>)readAllAsync(RedisCommands.ZRANGEBYSCORE);
-    }
-
-    private RFuture<?> readAllAsync(RedisCommand<? extends Collection<?>> command) {
-        return commandExecutor.readAsync(getName(), codec, command, getName(), System.currentTimeMillis(), 92233720368547758L);
-    }
-
-    
-    private RFuture<List<Object>> readAllasListAsync() {
-        return (RFuture<List<Object>>)readAllAsync(RedisCommands.ZRANGEBYSCORE_LIST);
+        return commandExecutor.readAsync(getName(), codec, RedisCommands.ZRANGEBYSCORE, getName(), System.currentTimeMillis(), 92233720368547758L);
     }
 
     @Override
     public Object[] toArray() {
-        List<Object> res = get(readAllasListAsync());
+        Set<V> res = get(readAllAsync());
         return res.toArray();
     }
 
     @Override
     public <T> T[] toArray(T[] a) {
-        List<Object> res = get(readAllasListAsync());
+        Set<V> res = get(readAllAsync());
         return res.toArray(a);
     }
 
@@ -193,17 +239,17 @@ public class RedissonSetCache<V> extends RedissonExpirable implements RSetCache<
             throw new NullPointerException("TimeUnit param can't be null");
         }
 
-        byte[] objectState = encode(value);
+        ByteBuf objectState = encode(value);
 
         long timeoutDate = System.currentTimeMillis() + unit.toMillis(ttl);
-        return commandExecutor.evalWriteAsync(getName(), codec, RedisCommands.EVAL_BOOLEAN,
+        return commandExecutor.evalWriteAsync(getName(value), codec, RedisCommands.EVAL_BOOLEAN,
                 "local expireDateScore = redis.call('zscore', KEYS[1], ARGV[3]); " +
                 "redis.call('zadd', KEYS[1], ARGV[2], ARGV[3]); " +
                 "if expireDateScore ~= false and tonumber(expireDateScore) > tonumber(ARGV[1]) then " +
                     "return 0;" +
                 "end; " +
                 "return 1; ",
-                Arrays.<Object>asList(getName()), System.currentTimeMillis(), timeoutDate, objectState);
+                Arrays.<Object>asList(getName(value)), System.currentTimeMillis(), timeoutDate, objectState);
     }
 
     @Override
@@ -213,12 +259,12 @@ public class RedissonSetCache<V> extends RedissonExpirable implements RSetCache<
 
     @Override
     public RFuture<Boolean> removeAsync(Object o) {
-        return commandExecutor.writeAsync(getName(), codec, RedisCommands.ZREM, getName(), o);
+        return commandExecutor.writeAsync(getName(o), codec, RedisCommands.ZREM, getName(o), encode(o));
     }
 
     @Override
     public boolean remove(Object value) {
-        return get(removeAsync((V)value));
+        return get(removeAsync((V) value));
     }
 
     @Override
@@ -229,14 +275,14 @@ public class RedissonSetCache<V> extends RedissonExpirable implements RSetCache<
     @Override
     public RFuture<Boolean> containsAllAsync(Collection<?> c) {
         if (c.isEmpty()) {
-            return newSucceededFuture(true);
+            return RedissonPromise.newSucceededFuture(true);
         }
         
         List<Object> params = new ArrayList<Object>(c.size() + 1);
         params.add(System.currentTimeMillis());
-        params.addAll(c);
+        encode(params, c);
         
-        return commandExecutor.evalReadAsync(getName(), codec, new RedisCommand<Boolean>("EVAL", new BooleanReplayConvertor(), 5, ValueType.OBJECTS),
+        return commandExecutor.evalReadAsync(getName(), codec, RedisCommands.EVAL_BOOLEAN,
                             "for j = 2, #ARGV, 1 do "
                             + "local expireDateScore = redis.call('zscore', KEYS[1], ARGV[j]) "
                             + "if expireDateScore ~= false then "
@@ -259,14 +305,14 @@ public class RedissonSetCache<V> extends RedissonExpirable implements RSetCache<
     @Override
     public RFuture<Boolean> addAllAsync(Collection<? extends V> c) {
         if (c.isEmpty()) {
-            return newSucceededFuture(false);
+            return RedissonPromise.newSucceededFuture(false);
         }
 
         long score = 92233720368547758L - System.currentTimeMillis();
         List<Object> params = new ArrayList<Object>(c.size()*2 + 1);
         params.add(getName());
         for (V value : c) {
-            byte[] objectState = encode(value);
+            ByteBuf objectState = encode(value);
             params.add(score);
             params.add(objectState);
         }
@@ -289,7 +335,7 @@ public class RedissonSetCache<V> extends RedissonExpirable implements RSetCache<
         List<Object> params = new ArrayList<Object>(c.size()*2);
         for (Object object : c) {
             params.add(score);
-            params.add(encode((V)object));
+            params.add(encode((V) object));
         }
         
         return commandExecutor.evalWriteAsync(getName(), codec, RedisCommands.EVAL_BOOLEAN,
@@ -304,12 +350,12 @@ public class RedissonSetCache<V> extends RedissonExpirable implements RSetCache<
     @Override
     public RFuture<Boolean> removeAllAsync(Collection<?> c) {
         if (c.isEmpty()) {
-            return newSucceededFuture(false);
+            return RedissonPromise.newSucceededFuture(false);
         }
         
         List<Object> params = new ArrayList<Object>(c.size()+1);
         params.add(getName());
-        params.addAll(c);
+        encode(params, c);
 
         return commandExecutor.writeAsync(getName(), codec, RedisCommands.ZREM, params.toArray());
     }
@@ -322,6 +368,64 @@ public class RedissonSetCache<V> extends RedissonExpirable implements RSetCache<
     @Override
     public void clear() {
         delete();
+    }
+
+    @Override
+    public RPermitExpirableSemaphore getPermitExpirableSemaphore(V value) {
+        String lockName = getLockByValue(value, "permitexpirablesemaphore");
+        return new RedissonPermitExpirableSemaphore(commandExecutor, lockName);
+    }
+
+    @Override
+    public RSemaphore getSemaphore(V value) {
+        String lockName = getLockByValue(value, "semaphore");
+        return new RedissonSemaphore(commandExecutor, lockName);
+    }
+    
+    @Override
+    public RCountDownLatch getCountDownLatch(V value) {
+        String lockName = getLockByValue(value, "countdownlatch");
+        return new RedissonCountDownLatch(commandExecutor, lockName);
+    }
+    
+    @Override
+    public RLock getFairLock(V value) {
+        String lockName = getLockByValue(value, "fairlock");
+        return new RedissonFairLock(commandExecutor, lockName);
+    }
+    
+    @Override
+    public RLock getLock(V value) {
+        String lockName = getLockByValue(value, "lock");
+        return new RedissonLock(commandExecutor, lockName);
+    }
+    
+    @Override
+    public RReadWriteLock getReadWriteLock(V value) {
+        String lockName = getLockByValue(value, "rw_lock");
+        return new RedissonReadWriteLock(commandExecutor, lockName);
+    }
+
+    @Override
+    public void destroy() {
+        if (evictionScheduler != null) {
+            evictionScheduler.remove(getName());
+        }
+    }
+
+    @Override
+    public Stream<V> stream(int count) {
+        return toStream(iterator(count));
+    }
+
+    @Override
+    public Stream<V> stream(String pattern, int count) {
+        return toStream(iterator(pattern, count));
+    }
+
+    @Override
+    public Stream<V> stream(String pattern) {
+        return toStream(iterator(pattern));
     }
 
 }

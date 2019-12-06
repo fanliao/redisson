@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,8 +17,15 @@ package org.redisson.client.protocol;
 
 import java.io.IOException;
 
+import io.netty.buffer.ByteBuf;
+
+/**
+ * 
+ * @author Nikita Koksharov
+ *
+ */
 public interface Encoder {
 
-    byte[] encode(Object in) throws IOException;
+    ByteBuf encode(Object in) throws IOException;
 
 }

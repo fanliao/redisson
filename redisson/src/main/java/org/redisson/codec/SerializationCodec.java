@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,38 +15,47 @@
  */
 package org.redisson.codec;
 
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.ObjectInputStream;
 import java.io.ObjectOutputStream;
 
-import org.redisson.client.codec.Codec;
+import org.redisson.client.codec.BaseCodec;
 import org.redisson.client.handler.State;
 import org.redisson.client.protocol.Decoder;
 import org.redisson.client.protocol.Encoder;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufAllocator;
 import io.netty.buffer.ByteBufInputStream;
+import io.netty.buffer.ByteBufOutputStream;
 
 /**
  *
  * @author Nikita Koksharov
  *
  */
-public class SerializationCodec implements Codec {
+public class SerializationCodec extends BaseCodec {
 
     private final Decoder<Object> decoder = new Decoder<Object>() {
         @Override
         public Object decode(ByteBuf buf, State state) throws IOException {
             try {
-                ByteBufInputStream in = new ByteBufInputStream(buf);
-                ObjectInputStream inputStream;
-                if (classLoader != null) {
-                    inputStream = new CustomObjectInputStream(classLoader, in);
-                } else {
-                    inputStream = new ObjectInputStream(in);
+                //set thread context class loader to be the classLoader variable as there could be reflection
+                //done while reading from input stream which reflection will use thread class loader to load classes on demand
+                ClassLoader currentThreadClassLoader = Thread.currentThread().getContextClassLoader();
+                try {
+                    ByteBufInputStream in = new ByteBufInputStream(buf);
+                    ObjectInputStream inputStream;
+                    if (classLoader != null) {
+                        Thread.currentThread().setContextClassLoader(classLoader);
+                        inputStream = new CustomObjectInputStream(classLoader, in);
+                    } else {
+                        inputStream = new ObjectInputStream(in);
+                    }
+                    return inputStream.readObject();
+                } finally {
+                    Thread.currentThread().setContextClassLoader(currentThreadClassLoader);
                 }
-                return inputStream.readObject();
             } catch (IOException e) {
                 throw e;
             } catch (Exception e) {
@@ -58,12 +67,18 @@ public class SerializationCodec implements Codec {
     private final Encoder encoder = new Encoder() {
 
         @Override
-        public byte[] encode(Object in) throws IOException {
-            ByteArrayOutputStream result = new ByteArrayOutputStream();
-            ObjectOutputStream outputStream = new ObjectOutputStream(result);
-            outputStream.writeObject(in);
-            outputStream.close();
-            return result.toByteArray();
+        public ByteBuf encode(Object in) throws IOException {
+            ByteBuf out = ByteBufAllocator.DEFAULT.buffer();
+            try {
+                ByteBufOutputStream result = new ByteBufOutputStream(out);
+                ObjectOutputStream outputStream = new ObjectOutputStream(result);
+                outputStream.writeObject(in);
+                outputStream.close();
+                return result.buffer();
+            } catch (IOException e) {
+                out.release();
+                throw e;
+            }
         }
     };
     
@@ -76,27 +91,11 @@ public class SerializationCodec implements Codec {
     public SerializationCodec(ClassLoader classLoader) {
         this.classLoader = classLoader;
     }
+
+    public SerializationCodec(ClassLoader classLoader, SerializationCodec codec) {
+        this.classLoader = classLoader;
+    }
     
-    @Override
-    public Decoder<Object> getMapValueDecoder() {
-        return getValueDecoder();
-    }
-
-    @Override
-    public Encoder getMapValueEncoder() {
-        return getValueEncoder();
-    }
-
-    @Override
-    public Decoder<Object> getMapKeyDecoder() {
-        return getValueDecoder();
-    }
-
-    @Override
-    public Encoder getMapKeyEncoder() {
-        return getValueEncoder();
-    }
-
     @Override
     public Decoder<Object> getValueDecoder() {
         return decoder;
@@ -105,6 +104,14 @@ public class SerializationCodec implements Codec {
     @Override
     public Encoder getValueEncoder() {
         return encoder;
+    }
+    
+    @Override
+    public ClassLoader getClassLoader() {
+        if (classLoader != null) {
+            return classLoader;
+        }
+        return getClass().getClassLoader();
     }
 
 }

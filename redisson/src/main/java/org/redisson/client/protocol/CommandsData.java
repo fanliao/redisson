@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,26 +28,49 @@ import org.redisson.misc.RPromise;
 public class CommandsData implements QueueCommand {
 
     private final List<CommandData<?, ?>> commands;
+    private final List<CommandData<?, ?>> attachedCommands;
     private final RPromise<Void> promise;
-    private final boolean noResult;
+    private final boolean skipResult;
+    private final boolean atomic;
+    private final boolean queued;
 
-    public CommandsData(RPromise<Void> promise, List<CommandData<?, ?>> commands) {
-        this(promise, commands, false);
+    public CommandsData(RPromise<Void> promise, List<CommandData<?, ?>> commands, boolean queued) {
+        this(promise, commands, null, false, false, queued);
     }
     
-    public CommandsData(RPromise<Void> promise, List<CommandData<?, ?>> commands, boolean noResult) {
+    public CommandsData(RPromise<Void> promise, List<CommandData<?, ?>> commands, boolean skipResult, boolean atomic, boolean queued) {
+        this(promise, commands, null, skipResult, atomic, queued);
+    }
+    
+    public CommandsData(RPromise<Void> promise, List<CommandData<?, ?>> commands, List<CommandData<?, ?>> attachedCommands, 
+            boolean skipResult, boolean atomic, boolean queued) {
         super();
         this.promise = promise;
         this.commands = commands;
-        this.noResult = noResult;
+        this.skipResult = skipResult;
+        this.atomic = atomic;
+        this.attachedCommands = attachedCommands;
+        this.queued = queued;
     }
 
     public RPromise<Void> getPromise() {
         return promise;
     }
 
-    public boolean isNoResult() {
-        return noResult;
+    public boolean isQueued() {
+        return queued;
+    }
+    
+    public boolean isAtomic() {
+        return atomic;
+    }
+    
+    public boolean isSkipResult() {
+        return skipResult;
+    }
+    
+    public List<CommandData<?, ?>> getAttachedCommands() {
+        return attachedCommands;
     }
     
     public List<CommandData<?, ?>> getCommands() {
@@ -58,8 +81,8 @@ public class CommandsData implements QueueCommand {
     public List<CommandData<Object, Object>> getPubSubOperations() {
         List<CommandData<Object, Object>> result = new ArrayList<CommandData<Object, Object>>();
         for (CommandData<?, ?> commandData : commands) {
-            if (PUBSUB_COMMANDS.equals(commandData.getCommand().getName())) {
-                result.add((CommandData<Object, Object>)commandData);
+            if (RedisCommands.PUBSUB_COMMANDS.contains(commandData.getCommand().getName())) {
+                result.add((CommandData<Object, Object>) commandData);
             }
         }
         return result;
@@ -68,6 +91,21 @@ public class CommandsData implements QueueCommand {
     @Override
     public boolean tryFailure(Throwable cause) {
         return promise.tryFailure(cause);
+    }
+
+    @Override
+    public String toString() {
+        return "CommandsData [commands=" + commands + "]";
+    }
+
+    @Override
+    public boolean isExecuted() {
+        return promise.isDone();
+    }
+
+    @Override
+    public boolean isBlockingCommand() {
+        return false;
     }
 
 }

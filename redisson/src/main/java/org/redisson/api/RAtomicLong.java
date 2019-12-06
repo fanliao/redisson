@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 package org.redisson.api;
 
 /**
- * Distributed alternative to the {@link java.util.concurrent.atomic.AtomicLong}
+ * Distributed implementation of {@link java.util.concurrent.atomic.AtomicLong}
  *
  * @author Nikita Koksharov
  *
@@ -57,12 +57,19 @@ public interface RAtomicLong extends RExpirable, RAtomicLongAsync {
     long decrementAndGet();
 
     /**
-     * Gets the current value.
+     * Returns current value.
      *
      * @return the current value
      */
     long get();
 
+    /**
+     * Gets and deletes object
+     * 
+     * @return the current value
+     */
+    long getAndDelete();
+    
     /**
      * Atomically adds the given value to the current value.
      *

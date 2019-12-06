@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,80 +15,70 @@
  */
 package org.redisson.reactive;
 
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicLong;
 
 import org.reactivestreams.Publisher;
 import org.reactivestreams.Subscription;
-import org.redisson.api.RCollectionReactive;
+import org.redisson.api.RFuture;
 
-import reactor.rx.Promise;
-import reactor.rx.Promises;
-import reactor.rx.action.support.DefaultSubscriber;
+import reactor.core.publisher.BaseSubscriber;
+import reactor.core.publisher.Mono;
 
-public class PublisherAdder<V> {
+/**
+ * 
+ * @author Nikita Koksharov
+ *
+ * @param <V> value type
+ */
+public abstract class PublisherAdder<V> {
 
-    private final RCollectionReactive<V> destination;
+    public abstract RFuture<Boolean> add(Object o);
 
-    public PublisherAdder(RCollectionReactive<V> destination) {
-        this.destination = destination;
-    }
-
-    public Long sum(Long first, Long second) {
-        return first + second;
-    }
-
-    public Publisher<Long> addAll(Publisher<? extends V> c) {
-        final Promise<Long> promise = Promises.prepare();
-
-        c.subscribe(new DefaultSubscriber<V>() {
+    public Publisher<Boolean> addAll(Publisher<? extends V> c) {
+        CompletableFuture<Boolean> promise = new CompletableFuture<>();
+        c.subscribe(new BaseSubscriber<V>() {
 
             volatile boolean completed;
             AtomicLong values = new AtomicLong();
             Subscription s;
-            Long lastSize = 0L;
+            Boolean lastSize = false;
 
             @Override
-            public void onSubscribe(Subscription s) {
+            protected void hookOnSubscribe(Subscription s) {
                 this.s = s;
                 s.request(1);
             }
 
             @Override
-            public void onNext(V o) {
+            protected void hookOnNext(V o) {
                 values.getAndIncrement();
-                destination.add(o).subscribe(new DefaultSubscriber<Long>() {
-
-                    @Override
-                    public void onSubscribe(Subscription s) {
-                        s.request(1);
+                add(o).onComplete((res, e) -> {
+                    if (e != null) {
+                        promise.completeExceptionally(e);
+                        return;
                     }
-
-                    @Override
-                    public void onError(Throwable t) {
-                        promise.onError(t);
+                    
+                    if (res) {
+                        lastSize = true;
                     }
-
-                    @Override
-                    public void onNext(Long o) {
-                        lastSize = sum(lastSize, o);
-                        s.request(1);
-                        if (values.decrementAndGet() == 0 && completed) {
-                            promise.onNext(lastSize);
-                        }
+                    s.request(1);
+                    if (values.decrementAndGet() == 0 && completed) {
+                        promise.complete(lastSize);
                     }
                 });
             }
 
             @Override
-            public void onComplete() {
+            protected void hookOnComplete() {
                 completed = true;
                 if (values.get() == 0) {
-                    promise.onNext(lastSize);
+                    promise.complete(lastSize);
                 }
             }
         });
 
-        return promise;
+        return Mono.fromCompletionStage(promise);
     }
 
 }

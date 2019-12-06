@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,10 +19,18 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.ObjectInputStream;
 import java.io.ObjectStreamClass;
+import java.lang.reflect.Proxy;
+import java.util.ArrayList;
+import java.util.List;
 
+/**
+ * 
+ * @author Nikita Koksharov
+ *
+ */
 public class CustomObjectInputStream extends ObjectInputStream {
 
-    private ClassLoader classLoader;
+    private final ClassLoader classLoader;
     
     public CustomObjectInputStream(ClassLoader classLoader, InputStream in) throws IOException {
         super(in);
@@ -37,6 +45,18 @@ public class CustomObjectInputStream extends ObjectInputStream {
         } catch (ClassNotFoundException e) {
             return super.resolveClass(desc);
         }
+    }
+    
+    @Override
+    protected Class<?> resolveProxyClass(String[] interfaces) throws IOException, ClassNotFoundException {
+        List<Class<?>> loadedClasses = new ArrayList<Class<?>>(interfaces.length);
+        
+        for (String name : interfaces) {
+            Class<?> clazz = Class.forName(name, false, classLoader);
+            loadedClasses.add(clazz);
+        }
+        
+        return Proxy.getProxyClass(classLoader, loadedClasses.toArray(new Class[loadedClasses.size()]));
     }
     
 }

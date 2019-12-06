@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ import org.redisson.client.codec.DoubleCodec;
 import org.redisson.client.codec.StringCodec;
 import org.redisson.client.protocol.RedisCommands;
 import org.redisson.client.protocol.RedisStrictCommand;
-import org.redisson.client.protocol.convertor.SingleConvertor;
+import org.redisson.client.protocol.convertor.Convertor;
 import org.redisson.command.CommandAsyncExecutor;
 
 /**
@@ -35,7 +35,7 @@ import org.redisson.command.CommandAsyncExecutor;
  */
 public class RedissonAtomicDouble extends RedissonExpirable implements RAtomicDouble {
 
-    protected RedissonAtomicDouble(CommandAsyncExecutor commandExecutor, String name) {
+    public RedissonAtomicDouble(CommandAsyncExecutor commandExecutor, String name) {
         super(commandExecutor, name);
     }
 
@@ -60,7 +60,8 @@ public class RedissonAtomicDouble extends RedissonExpirable implements RAtomicDo
     @Override
     public RFuture<Boolean> compareAndSetAsync(double expect, double update) {
         return commandExecutor.evalWriteAsync(getName(), StringCodec.INSTANCE, RedisCommands.EVAL_BOOLEAN,
-                "if tonumber(redis.call('get', KEYS[1])) == tonumber(ARGV[1]) then "
+                  "local value = redis.call('get', KEYS[1]);"
+                + "if (value == false and tonumber(ARGV[1]) == 0) or (tonumber(value) == tonumber(ARGV[1])) then "
                      + "redis.call('set', KEYS[1], ARGV[2]); "
                      + "return 1 "
                    + "else "
@@ -75,17 +76,31 @@ public class RedissonAtomicDouble extends RedissonExpirable implements RAtomicDo
 
     @Override
     public RFuture<Double> decrementAndGetAsync() {
-        return commandExecutor.writeAsync(getName(), StringCodec.INSTANCE, RedisCommands.DECR, getName());
+        return commandExecutor.writeAsync(getName(), StringCodec.INSTANCE, RedisCommands.INCRBYFLOAT, getName(), -1);
     }
 
     @Override
     public double get() {
-        return addAndGet(0);
+        return get(getAsync());
     }
 
     @Override
+    public double getAndDelete() {
+        return get(getAndDeleteAsync());
+    }
+    
+    @Override
+    public RFuture<Double> getAndDeleteAsync() {
+        return commandExecutor.evalWriteAsync(getName(), StringCodec.INSTANCE, RedisCommands.EVAL_DOUBLE,
+                   "local currValue = redis.call('get', KEYS[1]); "
+                 + "redis.call('del', KEYS[1]); "
+                 + "return currValue; ",
+                Collections.<Object>singletonList(getName()));
+    }
+    
+    @Override
     public RFuture<Double> getAsync() {
-        return addAndGetAsync(0);
+        return commandExecutor.writeAsync(getName(), StringCodec.INSTANCE, RedisCommands.GET_DOUBLE, getName());
     }
 
     @Override
@@ -95,7 +110,7 @@ public class RedissonAtomicDouble extends RedissonExpirable implements RAtomicDo
 
     @Override
     public RFuture<Double> getAndAddAsync(final double delta) {
-        return commandExecutor.writeAsync(getName(), StringCodec.INSTANCE, new RedisStrictCommand<Double>("INCRBYFLOAT", new SingleConvertor<Double>() {
+        return commandExecutor.writeAsync(getName(), StringCodec.INSTANCE, new RedisStrictCommand<Double>("INCRBYFLOAT", new Convertor<Double>() {
             @Override
             public Double convert(Object obj) {
                 return Double.valueOf(obj.toString()) - delta;
@@ -151,7 +166,7 @@ public class RedissonAtomicDouble extends RedissonExpirable implements RAtomicDo
 
     @Override
     public RFuture<Void> setAsync(double newValue) {
-        return commandExecutor.writeAsync(getName(), StringCodec.INSTANCE, RedisCommands.SET, getName(), BigDecimal.valueOf(newValue));
+        return commandExecutor.writeAsync(getName(), StringCodec.INSTANCE, RedisCommands.SET, getName(), BigDecimal.valueOf(newValue).toPlainString());
     }
 
     public String toString() {

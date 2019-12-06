@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,8 +15,10 @@
  */
 package org.redisson.api;
 
+import java.util.concurrent.TimeUnit;
+
 /**
- * Base interface for all Redisson objects
+ * Base asynchronous interface for all Redisson objects
  *
  * @author Nikita Koksharov
  *
@@ -24,16 +26,86 @@ package org.redisson.api;
 public interface RObjectAsync {
 
     /**
-     * Transfer an object from source Redis instance to destination Redis instance
+     * Returns bytes amount used by object in Redis memory. 
+     * 
+     * @return size in bytes
+     */
+    RFuture<Long> sizeInMemoryAsync();
+    
+    /**
+     * Restores object using its state returned by {@link #dumpAsync()} method.
+     * 
+     * @param state - state of object
+     * @return void
+     */
+    RFuture<Void> restoreAsync(byte[] state);
+    
+    /**
+     * Restores object using its state returned by {@link #dumpAsync()} method and set time to live for it.
+     * 
+     * @param state - state of object
+     * @param timeToLive - time to live of the object
+     * @param timeUnit - time unit
+     * @return void
+     */
+    RFuture<Void> restoreAsync(byte[] state, long timeToLive, TimeUnit timeUnit);
+    
+    /**
+     * Restores and replaces object if it already exists.
+     * 
+     * @param state - state of the object
+     * @return void
+     */
+    RFuture<Void> restoreAndReplaceAsync(byte[] state);
+    
+    /**
+     * Restores and replaces object if it already exists and set time to live for it.
+     * 
+     * @param state - state of the object
+     * @param timeToLive - time to live of the object
+     * @param timeUnit - time unit
+     * @return void
+     */
+    RFuture<Void> restoreAndReplaceAsync(byte[] state, long timeToLive, TimeUnit timeUnit);
+
+    /**
+     * Returns dump of object
+     * 
+     * @return dump
+     */
+    RFuture<byte[]> dumpAsync();
+    
+    /**
+     * Update the last access time of an object in async mode. 
+     * 
+     * @return <code>true</code> if object was touched else <code>false</code>
+     */
+    RFuture<Boolean> touchAsync();
+    
+    /**
+     * Transfer object from source Redis instance to destination Redis instance
      * in async mode
      *
      * @param host - destination host
      * @param port - destination port
      * @param database - destination database
+     * @param timeout - maximum idle time in any moment of the communication with the destination instance in milliseconds
      * @return void
      */
-    RFuture<Void> migrateAsync(String host, int port, int database);
+    RFuture<Void> migrateAsync(String host, int port, int database, long timeout);
 
+    /**
+     * Copy object from source Redis instance to destination Redis instance
+     * in async mode
+     *
+     * @param host - destination host
+     * @param port - destination port
+     * @param database - destination database
+     * @param timeout - maximum idle time in any moment of the communication with the destination instance in milliseconds
+     * @return void
+     */
+    RFuture<Void> copyAsync(String host, int port, int database, long timeout);
+    
     /**
      * Move object to another database in async mode
      *
@@ -49,6 +121,16 @@ public interface RObjectAsync {
      */
     RFuture<Boolean> deleteAsync();
 
+    /**
+     * Delete the objects.
+     * Actual removal will happen later asynchronously.
+     * <p>
+     * Requires Redis 4.0+
+     * 
+     * @return <code>true</code> if it was exist and deleted else <code>false</code>
+     */
+    RFuture<Boolean> unlinkAsync();
+    
     /**
      * Rename current object key to <code>newName</code>
      * in async mode
@@ -74,4 +156,22 @@ public interface RObjectAsync {
      */
     RFuture<Boolean> isExistsAsync();
 
+    /**
+     * Adds object event listener
+     * 
+     * @see org.redisson.api.ExpiredObjectListener
+     * @see org.redisson.api.DeletedObjectListener
+     * 
+     * @param listener - object event listener
+     * @return listener id
+     */
+    RFuture<Integer> addListenerAsync(ObjectListener listener);
+
+    /**
+     * Removes object event listener
+     * 
+     * @param listenerId - listener id
+     */
+    RFuture<Void> removeListenerAsync(int listenerId);
+    
 }

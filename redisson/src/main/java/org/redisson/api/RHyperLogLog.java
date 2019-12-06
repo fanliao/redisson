@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,21 +18,53 @@ package org.redisson.api;
 import java.util.Collection;
 
 /**
+ * Probabilistic data structure that lets you maintain counts of millions of items with extreme space efficiency.
  * 
  * @author Nikita Koksharov
  *
- * @param <V> value
+ * @param <V> type of stored values 
  */
 public interface RHyperLogLog<V> extends RExpirable, RHyperLogLogAsync<V> {
 
+    /**
+     * Adds element into this structure.
+     * 
+     * @param obj - element to add
+     * @return <code>true</code> if object has been added 
+     *          or <code>false</code> if it was already added
+     */
     boolean add(V obj);
 
+    /**
+     * Adds all elements contained in <code>objects</code> collection into this structure
+     * 
+     * @param objects - elements to add
+     * @return <code>true</code> if at least one object has been added 
+     *          or <code>false</code> if all were already added
+     */
     boolean addAll(Collection<V> objects);
 
+    /**
+     * Returns approximated number of unique elements added into this structure.
+     * 
+     * @return approximated number of unique elements added into this structure
+     */
     long count();
 
-    long countWith(String ... otherLogNames);
+    /**
+     * Returns approximated number of unique elements 
+     * added into this instances and other instances defined through <code>otherLogNames</code>.
+     * 
+     * @param otherLogNames - name of instances
+     * @return number
+     */
+    long countWith(String... otherLogNames);
 
-    void mergeWith(String ... otherLogNames);
+    /**
+     * Merges multiple instances into this instance.
+     * 
+     * @param otherLogNames - name of instances
+     */
+    void mergeWith(String... otherLogNames);
 
 }

@@ -1,19 +1,60 @@
 package org.redisson;
 
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import static org.assertj.core.api.Assertions.assertThat;
 
-import static org.assertj.core.api.Assertions.*;
+import java.io.IOException;
+import java.util.HashMap;
+import java.util.Map;
 
 import org.junit.Assert;
 import org.junit.Test;
+import org.redisson.ClusterRunner.ClusterProcesses;
+import org.redisson.RedisRunner.FailedToStartRedisException;
 import org.redisson.api.RBucket;
+import org.redisson.api.RBuckets;
+import org.redisson.api.RedissonClient;
+import org.redisson.client.codec.StringCodec;
+import org.redisson.config.Config;
+import org.redisson.connection.balancer.RandomLoadBalancer;
 
 public class RedissonBucketsTest extends BaseTest {
 
+    @Test
+    public void testGetInCluster() throws FailedToStartRedisException, IOException, InterruptedException {
+        RedisRunner master1 = new RedisRunner().randomPort().randomDir().nosave();
+        RedisRunner master2 = new RedisRunner().randomPort().randomDir().nosave();
+        RedisRunner master3 = new RedisRunner().randomPort().randomDir().nosave();
+        RedisRunner slave1 = new RedisRunner().randomPort().randomDir().nosave();
+        RedisRunner slave2 = new RedisRunner().randomPort().randomDir().nosave();
+        RedisRunner slave3 = new RedisRunner().randomPort().randomDir().nosave();
+
+        ClusterRunner clusterRunner = new ClusterRunner()
+                .addNode(master1, slave1)
+                .addNode(master2, slave2)
+                .addNode(master3, slave3);
+        ClusterProcesses process = clusterRunner.run();
+        
+        Config config = new Config();
+        config.useClusterServers()
+        .setLoadBalancer(new RandomLoadBalancer())
+        .addNodeAddress(process.getNodes().stream().findAny().get().getRedisServerAddressAndPort());
+        RedissonClient redisson = Redisson.create(config);
+        
+        int size = 10000;
+        Map<String, Integer> map = new HashMap<>();
+        for (int i = 0; i < size; i++) {
+            map.put("test" + i, i);
+            redisson.getBucket("test" + i).set(i);
+        }
+        
+        Map<String, Integer> buckets = redisson.getBuckets().get(map.keySet().toArray(new String[map.size()]));
+        
+        assertThat(buckets).isEqualTo(map);
+        
+        redisson.shutdown();
+        process.shutdown();
+    }
+    
     @Test
     public void testGet() {
         RBucket<String> bucket1 = redisson.getBucket("test1");
@@ -28,27 +69,22 @@ public class RedissonBucketsTest extends BaseTest {
 
         Assert.assertEquals(expected, result);
     }
-    
+
     @Test
-    public void testFind() {
-        Collection<String> names = Arrays.asList("test:testGetPattern:one", "test:testGetPattern:two");
-        Collection<String> vals = Arrays.asList("one-val", "two-val");
-        
-        redisson.getBucket("test:testGetPattern:one").set("one-val");
-        redisson.getBucket("test:testGetPattern:two").set("two-val");
-        
-        List<RBucket<String>> buckets = redisson.getBuckets().find("test:testGetPattern:*");
-        Assert.assertEquals(2, buckets.size());
-        Assert.assertTrue(names.contains(buckets.get(0).getName()));
-        Assert.assertTrue(names.contains(buckets.get(1).getName()));
-        Assert.assertTrue(vals.contains(buckets.get(0).get()));
-        Assert.assertTrue(vals.contains(buckets.get(1).get()));
-        for (RBucket<String> bucket : buckets) {
-            bucket.delete();
-        }
+    public void testCodec() {
+        RBuckets buckets = redisson.getBuckets(StringCodec.INSTANCE);
+        Map<String, String> items = buckets.get("buckets:A", "buckets:B", "buckets:C");
+
+        items.put("buckets:A", "XYZ");
+        items.put("buckets:B", "OPM");
+        items.put("buckets:C", "123");
+
+        buckets.set(items);
+        items = buckets.get("buckets:A", "buckets:B", "buckets:C");
+        Assert.assertEquals(3, items.size());
+        Assert.assertEquals("XYZ", items.get("buckets:A"));
     }
 
-    
     @Test
     public void testSet() {
         Map<String, Integer> buckets = new HashMap<String, Integer>();

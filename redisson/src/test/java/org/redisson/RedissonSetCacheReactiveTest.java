@@ -14,7 +14,6 @@ import java.util.concurrent.TimeUnit;
 import org.junit.Assert;
 import org.junit.Test;
 import org.redisson.api.RSetCacheReactive;
-import org.redisson.codec.MsgPackJacksonCodec;
 
 public class RedissonSetCacheReactiveTest extends BaseReactiveTest {
 
@@ -75,10 +74,10 @@ public class RedissonSetCacheReactiveTest extends BaseReactiveTest {
 
         assertThat(sync(set.add("123", 1, TimeUnit.SECONDS))).isFalse();
 
-        Thread.sleep(50);
+        Thread.sleep(800);
         assertThat(sync(set.contains("123"))).isTrue();
 
-        Thread.sleep(150);
+        Thread.sleep(250);
 
         assertThat(sync(set.contains("123"))).isFalse();
     }
@@ -86,9 +85,9 @@ public class RedissonSetCacheReactiveTest extends BaseReactiveTest {
     @Test
     public void testRemove() throws InterruptedException, ExecutionException {
         RSetCacheReactive<Integer> set = redisson.getSetCache("simple");
-        set.add(1, 1, TimeUnit.SECONDS);
-        set.add(3, 2, TimeUnit.SECONDS);
-        set.add(7, 3, TimeUnit.SECONDS);
+        sync(set.add(1, 1, TimeUnit.SECONDS));
+        sync(set.add(3, 2, TimeUnit.SECONDS));
+        sync(set.add(7, 3, TimeUnit.SECONDS));
 
         Assert.assertTrue(sync(set.remove(1)));
         Assert.assertFalse(sync(set.contains(1)));
@@ -104,12 +103,15 @@ public class RedissonSetCacheReactiveTest extends BaseReactiveTest {
     }
 
     @Test
-    public void testIteratorSequence() {
+    public void testIteratorSequence() throws InterruptedException {
         RSetCacheReactive<Long> set = redisson.getSetCache("set");
         for (int i = 0; i < 1000; i++) {
             sync(set.add(Long.valueOf(i)));
         }
 
+        Thread.sleep(1000);
+        assertThat(sync(set.size())).isEqualTo(1000);
+        
         Set<Long> setCopy = new HashSet<Long>();
         for (int i = 0; i < 1000; i++) {
             setCopy.add(Long.valueOf(i));
@@ -187,14 +189,14 @@ public class RedissonSetCacheReactiveTest extends BaseReactiveTest {
     @Test
     public void testSize() {
         RSetCacheReactive<Integer> set = redisson.getSetCache("set");
-        Assert.assertEquals(1, sync(set.add(1)).intValue());
-        Assert.assertEquals(1, sync(set.add(2)).intValue());
-        Assert.assertEquals(1, sync(set.add(3)).intValue());
-        Assert.assertEquals(0, sync(set.add(3)).intValue());
-        Assert.assertEquals(0, sync(set.add(3)).intValue());
-        Assert.assertEquals(1, sync(set.add(4)).intValue());
-        Assert.assertEquals(1, sync(set.add(5)).intValue());
-        Assert.assertEquals(0, sync(set.add(5)).intValue());
+        Assert.assertEquals(true, sync(set.add(1)));
+        Assert.assertEquals(true, sync(set.add(2)));
+        Assert.assertEquals(true, sync(set.add(3)));
+        Assert.assertEquals(false, sync(set.add(3)));
+        Assert.assertEquals(false, sync(set.add(3)));
+        Assert.assertEquals(true, sync(set.add(4)));
+        Assert.assertEquals(true, sync(set.add(5)));
+        Assert.assertEquals(false, sync(set.add(5)));
 
         Assert.assertEquals(5, sync(set.size()).intValue());
     }
@@ -264,11 +266,11 @@ public class RedissonSetCacheReactiveTest extends BaseReactiveTest {
     @Test
     public void testClearExpire() throws InterruptedException {
         RSetCacheReactive<String> cache = redisson.getSetCache("simple");
-        cache.add("8", 1, TimeUnit.SECONDS);
+        sync(cache.add("8", 1, TimeUnit.SECONDS));
 
-        cache.expireAt(System.currentTimeMillis() + 100);
+        sync(cache.expireAt(System.currentTimeMillis() + 100));
 
-        cache.clearExpire();
+        sync(cache.clearExpire());
 
         Thread.sleep(500);
 
@@ -277,7 +279,7 @@ public class RedissonSetCacheReactiveTest extends BaseReactiveTest {
 
     @Test
     public void testScheduler() throws InterruptedException {
-        RSetCacheReactive<String> cache = redisson.getSetCache("simple33", new MsgPackJacksonCodec());
+        RSetCacheReactive<String> cache = redisson.getSetCache("simple33");
         Assert.assertFalse(sync(cache.contains("33")));
 
         Assert.assertTrue(sync(cache.add("33", 5, TimeUnit.SECONDS)));

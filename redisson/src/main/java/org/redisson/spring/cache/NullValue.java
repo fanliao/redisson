@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,10 +15,19 @@
  */
 package org.redisson.spring.cache;
 
+import java.io.Serializable;
+
 import org.springframework.cache.Cache.ValueWrapper;
 
-public class NullValue implements ValueWrapper {
+/**
+ * 
+ * @author Nikita Koksharov
+ *
+ */
+public class NullValue implements ValueWrapper, Serializable {
 
+    private static final long serialVersionUID = -8310337775544536701L;
+    
     public static final NullValue INSTANCE = new NullValue();
 
     @Override

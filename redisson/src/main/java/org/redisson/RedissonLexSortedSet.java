@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,18 +17,28 @@ package org.redisson;
 
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Comparator;
 import java.util.List;
+import java.util.SortedSet;
 
 import org.redisson.api.RFuture;
 import org.redisson.api.RLexSortedSet;
+import org.redisson.api.RedissonClient;
 import org.redisson.client.codec.StringCodec;
 import org.redisson.client.protocol.RedisCommands;
 import org.redisson.command.CommandAsyncExecutor;
+import org.redisson.misc.RedissonPromise;
 
+/**
+ * Sorted set contained values of String type
+ * 
+ * @author Nikita Koksharov
+ *
+ */
 public class RedissonLexSortedSet extends RedissonScoredSortedSet<String> implements RLexSortedSet {
 
-    public RedissonLexSortedSet(CommandAsyncExecutor commandExecutor, String name) {
-        super(StringCodec.INSTANCE, commandExecutor, name);
+    public RedissonLexSortedSet(CommandAsyncExecutor commandExecutor, String name, RedissonClient redisson) {
+        super(StringCodec.INSTANCE, commandExecutor, name, redisson);
     }
 
     @Override
@@ -141,6 +151,82 @@ public class RedissonLexSortedSet extends RedissonScoredSortedSet<String> implem
     }
     
     @Override
+    public Collection<String> rangeTailReversed(String fromElement, boolean fromInclusive) {
+        return get(rangeTailReversedAsync(fromElement, fromInclusive));
+    }
+
+    @Override
+    public Collection<String> rangeHeadReversed(String toElement, boolean toInclusive) {
+        return get(rangeHeadReversedAsync(toElement, toInclusive));
+    }
+
+    @Override
+    public Collection<String> rangeReversed(String fromElement, boolean fromInclusive, String toElement,
+            boolean toInclusive) {
+        return get(rangeReversedAsync(fromElement, fromInclusive, toElement, toInclusive));
+    }
+
+    @Override
+    public Collection<String> rangeTailReversed(String fromElement, boolean fromInclusive, int offset, int count) {
+        return get(rangeTailReversedAsync(fromElement, fromInclusive, offset, count));
+    }
+
+    @Override
+    public Collection<String> rangeHeadReversed(String toElement, boolean toInclusive, int offset, int count) {
+        return get(rangeHeadReversedAsync(toElement, toInclusive, offset, count));
+    }
+
+    @Override
+    public Collection<String> rangeReversed(String fromElement, boolean fromInclusive, String toElement,
+            boolean toInclusive, int offset, int count) {
+        return get(rangeReversedAsync(fromElement, fromInclusive, toElement, toInclusive, offset, count));
+    }
+
+    @Override
+    public RFuture<Collection<String>> rangeTailReversedAsync(String fromElement, boolean fromInclusive) {
+        String fromValue = value(fromElement, fromInclusive);
+        return commandExecutor.readAsync(getName(), StringCodec.INSTANCE, RedisCommands.ZREVRANGEBYLEX, getName(), "+", fromValue);
+    }
+
+    @Override
+    public RFuture<Collection<String>> rangeHeadReversedAsync(String toElement, boolean toInclusive) {
+        String toValue = value(toElement, toInclusive);
+        return commandExecutor.readAsync(getName(), StringCodec.INSTANCE, RedisCommands.ZREVRANGEBYLEX, getName(), toValue, "-");
+    }
+
+    @Override
+    public RFuture<Collection<String>> rangeReversedAsync(String fromElement, boolean fromInclusive, String toElement,
+            boolean toInclusive) {
+        String fromValue = value(fromElement, fromInclusive);
+        String toValue = value(toElement, toInclusive);
+        
+        return commandExecutor.readAsync(getName(), StringCodec.INSTANCE, RedisCommands.ZREVRANGEBYLEX, getName(), toValue, fromValue);
+    }
+
+    @Override
+    public RFuture<Collection<String>> rangeTailReversedAsync(String fromElement, boolean fromInclusive, int offset,
+            int count) {
+        String fromValue = value(fromElement, fromInclusive);
+        return commandExecutor.readAsync(getName(), StringCodec.INSTANCE, RedisCommands.ZREVRANGEBYLEX, getName(), "+", fromValue, "LIMIT", offset, count);
+    }
+
+    @Override
+    public RFuture<Collection<String>> rangeHeadReversedAsync(String toElement, boolean toInclusive, int offset,
+            int count) {
+        String toValue = value(toElement, toInclusive);
+        return commandExecutor.readAsync(getName(), StringCodec.INSTANCE, RedisCommands.ZREVRANGEBYLEX, getName(), toValue, "-", "LIMIT", offset, count);
+    }
+
+    @Override
+    public RFuture<Collection<String>> rangeReversedAsync(String fromElement, boolean fromInclusive, String toElement,
+            boolean toInclusive, int offset, int count) {
+        String fromValue = value(fromElement, fromInclusive);
+        String toValue = value(toElement, toInclusive);
+        
+        return commandExecutor.readAsync(getName(), StringCodec.INSTANCE, RedisCommands.ZREVRANGEBYLEX, getName(), toValue, fromValue, "LIMIT", offset, count);
+    }
+
+    @Override
     public int countTail(String fromElement, boolean fromInclusive) {
         return get(countTailAsync(fromElement, fromInclusive));
     }
@@ -196,7 +282,7 @@ public class RedissonLexSortedSet extends RedissonScoredSortedSet<String> implem
     @Override
     public RFuture<Boolean> addAllAsync(Collection<? extends String> c) {
         if (c.isEmpty()) {
-            return newSucceededFuture(false);
+            return RedissonPromise.newSucceededFuture(false);
         }
         List<Object> params = new ArrayList<Object>(2*c.size());
         params.add(getName());
@@ -226,5 +312,30 @@ public class RedissonLexSortedSet extends RedissonScoredSortedSet<String> implem
     public RFuture<Collection<String>> rangeAsync(int startIndex, int endIndex) {
         return valueRangeAsync(startIndex, endIndex);
     }
-    
+
+    @Override
+    public boolean trySetComparator(Comparator<? super String> comparator) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public Comparator<? super String> comparator() {
+        return null;
+    }
+
+    @Override
+    public SortedSet<String> subSet(String fromElement, String toElement) {
+        throw new UnsupportedOperationException();
+    }
+
+    @Override
+    public SortedSet<String> headSet(String toElement) {
+        return subSet(null, toElement);
+    }
+
+    @Override
+    public SortedSet<String> tailSet(String fromElement) {
+        return subSet(fromElement, null);
+    }
+
 }

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,9 +16,10 @@
 package org.redisson.api;
 
 import java.util.Deque;
+import java.util.List;
 
 /**
- * {@link java.util.Deque} backed by Redis
+ * Distributed implementation of {@link java.util.Deque}
  *
  * @author Nikita Koksharov
  *
@@ -26,5 +27,20 @@ import java.util.Deque;
  */
 public interface RDeque<V> extends Deque<V>, RQueue<V>, RDequeAsync<V> {
 
+    /**
+     * Retrieves and removes the tail elements of this queue.
+     * Elements amount limited by <code>limit</code> param.
+     *
+     * @return list of tail elements
+     */
+    List<V> pollLast(int limit);
+
+    /**
+     * Retrieves and removes the head elements of this queue.
+     * Elements amount limited by <code>limit</code> param.
+     *
+     * @return list of head elements
+     */
+    List<V> pollFirst(int limit);
 
 }

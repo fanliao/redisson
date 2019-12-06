@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,53 +15,32 @@
  */
 package org.redisson.client.handler;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
-
-import org.redisson.client.protocol.decoder.DecoderState;
-
+/**
+ * 
+ * @author Nikita Koksharov
+ *
+ */
 public class State {
 
     private int batchIndex;
-    private DecoderState decoderState;
 
     private int level = -1;
-    private List<StateLevel> levels;
-    private DecoderState decoderStateCopy;
-    private final boolean makeCheckpoint;
 
-    public State(boolean makeCheckpoint) {
-        this.makeCheckpoint = makeCheckpoint;
+    public State() {
     }
 
-    public boolean isMakeCheckpoint() {
-        return makeCheckpoint;
+    public int getLevel() {
+        return level;
     }
 
-    public void resetLevel() {
-        level = -1;
-    }
-    public int decLevel() {
-        return --level;
-    }
-    public int incLevel() {
-        return ++level;
+    public void incLevel() {
+        level++;
     }
     
-    public void addLevel(StateLevel stateLevel) {
-        if (levels == null) {
-            levels = new ArrayList<StateLevel>(2);
-        }
-        levels.add(stateLevel);
+    public void decLevel() {
+        level--;
     }
-    public List<StateLevel> getLevels() {
-        if (levels == null) {
-            return Collections.emptyList();
-        }
-        return levels;
-    }
-
+    
     public void setBatchIndex(int index) {
         this.batchIndex = index;
     }
@@ -69,26 +48,9 @@ public class State {
         return batchIndex;
     }
 
-    public <T extends DecoderState> T getDecoderState() {
-        return (T) decoderState;
-    }
-    public void setDecoderState(DecoderState decoderState) {
-        this.decoderState = decoderState;
-    }
-
-    public DecoderState getDecoderStateCopy() {
-        return decoderStateCopy;
-    }
-    public void setDecoderStateCopy(DecoderState decoderStateCopy) {
-        this.decoderStateCopy = decoderStateCopy;
-    }
-
     @Override
     public String toString() {
-        return "State [batchIndex=" + batchIndex + ", decoderState=" + decoderState + ", level=" + level + ", levels="
-                + levels + ", decoderStateCopy=" + decoderStateCopy + "]";
+        return "State [batchIndex=" + batchIndex + ", level=" + level + "]";
     }
 
-    
-    
 }

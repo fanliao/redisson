@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,133 +15,61 @@
  */
 package org.redisson.reactive;
 
-import java.util.ArrayList;
-import java.util.Collection;
-import java.util.List;
-
 import org.reactivestreams.Publisher;
-import org.redisson.api.RLexSortedSetReactive;
-import org.redisson.client.codec.StringCodec;
-import org.redisson.client.protocol.RedisCommands;
-import org.redisson.command.CommandReactiveExecutor;
+import org.redisson.RedissonScoredSortedSet;
+import org.redisson.api.RFuture;
+import org.redisson.api.RLexSortedSet;
+import org.redisson.client.RedisClient;
+import org.redisson.client.protocol.decoder.ListScanResult;
 
-public class RedissonLexSortedSetReactive extends RedissonScoredSortedSetReactive<String> implements RLexSortedSetReactive {
+import reactor.core.publisher.Flux;
 
-    public RedissonLexSortedSetReactive(CommandReactiveExecutor commandExecutor, String name) {
-        super(StringCodec.INSTANCE, commandExecutor, name);
+
+/**
+ * 
+ * @author Nikita Koksharov
+ *
+ */
+public class RedissonLexSortedSetReactive {
+
+    private final RLexSortedSet instance;
+    
+    public RedissonLexSortedSetReactive(RLexSortedSet instance) {
+        this.instance = instance;
     }
 
-    @Override
-    public Publisher<Long> addAll(Publisher<? extends String> c) {
-        return new PublisherAdder<String>(this).addAll(c);
+    public Publisher<Boolean> addAll(Publisher<? extends String> c) {
+        return new PublisherAdder<String>() {
+            @Override
+            public RFuture<Boolean> add(Object e) {
+                return instance.addAsync((String) e);
+            }
+        }.addAll(c);
     }
 
-    @Override
-    public Publisher<Integer> removeRangeHeadByLex(String toElement, boolean toInclusive) {
-        String toValue = value(toElement, toInclusive);
-        return commandExecutor.writeReactive(getName(), StringCodec.INSTANCE, RedisCommands.ZREMRANGEBYLEX, getName(), "-", toValue);
+    private Publisher<String> scanIteratorReactive(final String pattern, final int count) {
+        return Flux.create(new SetReactiveIterator<String>() {
+            @Override
+            protected RFuture<ListScanResult<Object>> scanIterator(final RedisClient client, final long nextIterPos) {
+                return ((RedissonScoredSortedSet<String>) instance).scanIteratorAsync(client, nextIterPos, pattern, count);
+            }
+        });
     }
 
-    @Override
-    public Publisher<Integer> removeRangeTailByLex(String fromElement, boolean fromInclusive) {
-        String fromValue = value(fromElement, fromInclusive);
-        return commandExecutor.writeReactive(getName(), StringCodec.INSTANCE, RedisCommands.ZREMRANGEBYLEX, getName(), fromValue, "+");
+    public Publisher<String> iterator() {
+        return scanIteratorReactive(null, 10);
     }
 
-    @Override
-    public Publisher<Integer> removeRangeByLex(String fromElement, boolean fromInclusive, String toElement, boolean toInclusive) {
-        String fromValue = value(fromElement, fromInclusive);
-        String toValue = value(toElement, toInclusive);
-
-        return commandExecutor.writeReactive(getName(), StringCodec.INSTANCE, RedisCommands.ZREMRANGEBYLEX, getName(), fromValue, toValue);
+    public Publisher<String> iterator(String pattern) {
+        return scanIteratorReactive(pattern, 10);
     }
 
-    @Override
-    public Publisher<Collection<String>> lexRangeHead(String toElement, boolean toInclusive) {
-        String toValue = value(toElement, toInclusive);
-        return commandExecutor.readReactive(getName(), StringCodec.INSTANCE, RedisCommands.ZRANGEBYLEX, getName(), "-", toValue);
+    public Publisher<String> iterator(int count) {
+        return scanIteratorReactive(null, count);
     }
 
-    @Override
-    public Publisher<Collection<String>> lexRangeTail(String fromElement, boolean fromInclusive) {
-        String fromValue = value(fromElement, fromInclusive);
-        return commandExecutor.readReactive(getName(), StringCodec.INSTANCE, RedisCommands.ZRANGEBYLEX, getName(), fromValue, "+");
-    }
-
-
-    @Override
-    public Publisher<Collection<String>> lexRange(String fromElement, boolean fromInclusive, String toElement, boolean toInclusive) {
-        String fromValue = value(fromElement, fromInclusive);
-        String toValue = value(toElement, toInclusive);
-
-        return commandExecutor.readReactive(getName(), StringCodec.INSTANCE, RedisCommands.ZRANGEBYLEX, getName(), fromValue, toValue);
-    }
-
-    @Override
-    public Publisher<Collection<String>> lexRangeHead(String toElement, boolean toInclusive, int offset, int count) {
-        String toValue = value(toElement, toInclusive);
-        return commandExecutor.readReactive(getName(), StringCodec.INSTANCE, RedisCommands.ZRANGEBYLEX, getName(), "-", toValue, "LIMIT", offset, count);
-    }
-
-    @Override
-    public Publisher<Collection<String>> lexRangeTail(String fromElement, boolean fromInclusive, int offset, int count) {
-        String fromValue = value(fromElement, fromInclusive);
-        return commandExecutor.readReactive(getName(), StringCodec.INSTANCE, RedisCommands.ZRANGEBYLEX, getName(), fromValue, "+", "LIMIT", offset, count);
-    }
-
-    @Override
-    public Publisher<Collection<String>> lexRange(String fromElement, boolean fromInclusive, String toElement, boolean toInclusive, int offset, int count) {
-        String fromValue = value(fromElement, fromInclusive);
-        String toValue = value(toElement, toInclusive);
-
-        return commandExecutor.readReactive(getName(), StringCodec.INSTANCE, RedisCommands.ZRANGEBYLEX, getName(), fromValue, toValue, "LIMIT", offset, count);
-    }
-
-    @Override
-    public Publisher<Integer> lexCountTail(String fromElement, boolean fromInclusive) {
-        String fromValue = value(fromElement, fromInclusive);
-
-        return commandExecutor.readReactive(getName(), StringCodec.INSTANCE, RedisCommands.ZLEXCOUNT, getName(), fromValue, "+");
-    }
-
-    @Override
-    public Publisher<Integer> lexCountHead(String toElement, boolean toInclusive) {
-        String toValue = value(toElement, toInclusive);
-
-        return commandExecutor.readReactive(getName(), StringCodec.INSTANCE, RedisCommands.ZLEXCOUNT, getName(), "-", toValue);
-    }
-
-    @Override
-    public Publisher<Integer> lexCount(String fromElement, boolean fromInclusive, String toElement, boolean toInclusive) {
-        String fromValue = value(fromElement, fromInclusive);
-        String toValue = value(toElement, toInclusive);
-
-        return commandExecutor.readReactive(getName(), StringCodec.INSTANCE, RedisCommands.ZLEXCOUNT, getName(), fromValue, toValue);
-    }
-
-    private String value(String fromElement, boolean fromInclusive) {
-        String fromValue = fromElement.toString();
-        if (fromInclusive) {
-            fromValue = "[" + fromValue;
-        } else {
-            fromValue = "(" + fromValue;
-        }
-        return fromValue;
-    }
-
-    @Override
-    public Publisher<Long> add(String e) {
-        return commandExecutor.writeReactive(getName(), StringCodec.INSTANCE, RedisCommands.ZADD_RAW, getName(), 0, e);
-    }
-
-    @Override
-    public Publisher<Long> addAll(Collection<? extends String> c) {
-        List<Object> params = new ArrayList<Object>(2*c.size());
-        for (Object param : c) {
-            params.add(0);
-            params.add(param);
-        }
-        return commandExecutor.writeReactive(getName(), StringCodec.INSTANCE, RedisCommands.ZADD_RAW, getName(), params.toArray());
+    public Publisher<String> iterator(String pattern, int count) {
+        return scanIteratorReactive(pattern, count);
     }
 
 }

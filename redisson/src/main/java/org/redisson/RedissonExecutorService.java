@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,60 +15,36 @@
  */
 package org.redisson;
 
-import java.io.DataInputStream;
-import java.io.IOException;
-import java.io.InputStream;
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.Collections;
-import java.util.Date;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.Callable;
-import java.util.concurrent.CancellationException;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.ExecutionException;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Future;
-import java.util.concurrent.RejectedExecutionException;
-import java.util.concurrent.ScheduledFuture;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicReference;
-
-import org.redisson.api.RFuture;
-import org.redisson.api.RScheduledExecutorService;
-import org.redisson.api.RScheduledFuture;
-import org.redisson.api.RTopic;
-import org.redisson.api.RedissonClient;
-import org.redisson.api.RemoteInvocationOptions;
-import org.redisson.api.annotation.RInject;
-import org.redisson.api.listener.BaseStatusListener;
+import io.netty.buffer.ByteBuf;
+import io.netty.buffer.ByteBufUtil;
+import org.redisson.api.*;
 import org.redisson.api.listener.MessageListener;
 import org.redisson.client.codec.Codec;
 import org.redisson.client.codec.LongCodec;
+import org.redisson.client.codec.StringCodec;
 import org.redisson.client.protocol.RedisCommands;
 import org.redisson.command.CommandExecutor;
 import org.redisson.connection.ConnectionManager;
-import org.redisson.executor.ExecutorRemoteService;
-import org.redisson.executor.RedissonScheduledFuture;
-import org.redisson.executor.RemoteExecutorService;
-import org.redisson.executor.RemoteExecutorServiceAsync;
-import org.redisson.executor.RemoteExecutorServiceImpl;
-import org.redisson.executor.RemotePromise;
-import org.redisson.executor.ScheduledExecutorRemoteService;
+import org.redisson.executor.*;
+import org.redisson.executor.params.*;
+import org.redisson.misc.Injector;
+import org.redisson.misc.PromiseDelegator;
 import org.redisson.misc.RPromise;
+import org.redisson.misc.RedissonPromise;
+import org.redisson.remote.RequestId;
+import org.redisson.remote.ResponseEntry;
+import org.redisson.remote.ResponseEntry.Result;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import io.netty.util.Timeout;
-import io.netty.util.TimerTask;
-import io.netty.util.concurrent.FutureListener;
-import io.netty.util.internal.PlatformDependent;
+import java.io.*;
+import java.lang.invoke.SerializedLambda;
+import java.lang.ref.ReferenceQueue;
+import java.lang.reflect.Method;
+import java.lang.reflect.Modifier;
+import java.util.*;
+import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicReference;
 
 /**
  * 
@@ -77,7 +53,9 @@ import io.netty.util.internal.PlatformDependent;
  */
 public class RedissonExecutorService implements RScheduledExecutorService {
 
-    private static final Logger log = LoggerFactory.getLogger(RedissonExecutorService.class);
+    private static final Logger LOGGER = LoggerFactory.getLogger(RedissonExecutorService.class);
+    
+    private static final RemoteInvocationOptions RESULT_OPTIONS = RemoteInvocationOptions.defaults().noAck().expectResultWithin(1, TimeUnit.HOURS);
     
     public static final int SHUTDOWN_STATE = 1;
     public static final int TERMINATED_STATE = 2;
@@ -87,82 +65,221 @@ public class RedissonExecutorService implements RScheduledExecutorService {
     private final Codec codec;
     private final Redisson redisson;
     
-    private final String schedulerTasksName;
+    private final String tasksName;
     private final String schedulerQueueName;
     private final String schedulerChannelName;
+    private final String tasksRetryIntervalName;
+    private final String tasksExpirationTimeName;
+    
+    private final String workersChannelName;
+    private final String workersSemaphoreName;
+    private final String workersCounterName;
     
     private final String tasksCounterName;
     private final String statusName;
-    private final RTopic<Integer> terminationTopic;
+    private final RTopic terminationTopic;
+    private final RedissonExecutorRemoteService remoteService;
+    private final RTopic workersTopic;
+    private int workersGroupListenerId;
 
     private final RemoteExecutorServiceAsync asyncScheduledService;
     private final RemoteExecutorServiceAsync asyncScheduledServiceAtFixed;
     private final RemoteExecutorServiceAsync asyncService;
     private final RemoteExecutorServiceAsync asyncServiceWithoutResult;
-    private final ScheduledExecutorRemoteService scheduledRemoteService;
     
-    private final Map<Class<?>, byte[]> class2bytes = PlatformDependent.newConcurrentHashMap();
+    private final ScheduledTasksService scheduledRemoteService;
+    private final TasksService executorRemoteService;
+    
+    private final Map<Class<?>, ClassBody> class2body = new ConcurrentHashMap<>();
 
     private final String name;
     private final String requestQueueName;
+    private final String responseQueueName;
+    private final QueueTransferService queueTransferService;
+    private final String executorId;
+    private final ConcurrentMap<String, ResponseEntry> responses;
+
+    private final ReferenceQueue<RExecutorFuture<?>> referenceDueue = new ReferenceQueue<>();
+    private final Collection<RedissonExecutorFutureReference> references = Collections.newSetFromMap(new ConcurrentHashMap<>());
     
-    public RedissonExecutorService(Codec codec, CommandExecutor commandExecutor, Redisson redisson, String name) {
+    public RedissonExecutorService(Codec codec, CommandExecutor commandExecutor, Redisson redisson, 
+            String name, QueueTransferService queueTransferService, ConcurrentMap<String, ResponseEntry> responses, ExecutorOptions options) {
         super();
         this.codec = codec;
         this.commandExecutor = commandExecutor;
         this.connectionManager = commandExecutor.getConnectionManager();
         this.name = name;
         this.redisson = redisson;
+        this.queueTransferService = queueTransferService;
+        this.responses = responses;
+
+        if (codec == connectionManager.getCodec()) {
+            this.executorId = connectionManager.getId();
+        } else {
+            this.executorId = connectionManager.getId() + ":" + RemoteExecutorServiceAsync.class.getName() + ":" + name;
+        }
         
-        requestQueueName = "{" + name + ":"+ RemoteExecutorService.class.getName() + "}";
+        remoteService = new RedissonExecutorRemoteService(codec, name, connectionManager.getCommandExecutor(), executorId, responses);
+        requestQueueName = remoteService.getRequestQueueName(RemoteExecutorService.class);
+        responseQueueName = remoteService.getResponseQueueName(executorId);
         String objectName = requestQueueName;
         tasksCounterName = objectName + ":counter";
+        tasksName = objectName + ":tasks";
         statusName = objectName + ":status";
-        terminationTopic = redisson.getTopic(objectName + ":termination-topic", codec);
+        terminationTopic = redisson.getTopic(objectName + ":termination-topic", LongCodec.INSTANCE);
 
+        tasksRetryIntervalName = objectName + ":retry-interval";
+        tasksExpirationTimeName = objectName + ":expiration";
         schedulerChannelName = objectName + ":scheduler-channel";
         schedulerQueueName = objectName + ":scheduler";
-        schedulerTasksName = objectName + ":scheduler-tasks";
         
-        ExecutorRemoteService remoteService = new ExecutorRemoteService(codec, redisson, name, commandExecutor);
-        remoteService.setTerminationTopicName(terminationTopic.getChannelNames().get(0));
-        remoteService.setTasksCounterName(tasksCounterName);
+        workersChannelName = objectName + ":workers-channel";
+        workersSemaphoreName = objectName + ":workers-semaphore";
+        workersCounterName = objectName + ":workers-counter";
+        
+        workersTopic = redisson.getTopic(workersChannelName);
+
         remoteService.setStatusName(statusName);
-        asyncService = remoteService.get(RemoteExecutorServiceAsync.class, RemoteInvocationOptions.defaults().noAck().expectResultWithin(1, TimeUnit.DAYS));
-        asyncServiceWithoutResult = remoteService.get(RemoteExecutorServiceAsync.class, RemoteInvocationOptions.defaults().noAck().noResult());
+        remoteService.setTasksCounterName(tasksCounterName);
+        remoteService.setTasksExpirationTimeName(tasksExpirationTimeName);
+        remoteService.setTasksRetryIntervalName(tasksRetryIntervalName);
+        remoteService.setTerminationTopicName(terminationTopic.getChannelNames().get(0));
+
+        executorRemoteService = new TasksService(codec, name, commandExecutor, executorId, responses);
+        executorRemoteService.setTerminationTopicName(terminationTopic.getChannelNames().get(0));
+        executorRemoteService.setTasksCounterName(tasksCounterName);
+        executorRemoteService.setStatusName(statusName);
+        executorRemoteService.setTasksName(tasksName);
+        executorRemoteService.setSchedulerChannelName(schedulerChannelName);
+        executorRemoteService.setSchedulerQueueName(schedulerQueueName);
+        executorRemoteService.setTasksRetryIntervalName(tasksRetryIntervalName);
+        executorRemoteService.setTasksExpirationTimeName(tasksExpirationTimeName);
+        executorRemoteService.setTasksRetryInterval(options.getTaskRetryInterval());
+        asyncService = executorRemoteService.get(RemoteExecutorServiceAsync.class, RESULT_OPTIONS);
+        asyncServiceWithoutResult = executorRemoteService.get(RemoteExecutorServiceAsync.class, RemoteInvocationOptions.defaults().noAck().noResult());
         
-        scheduledRemoteService = new ScheduledExecutorRemoteService(codec, redisson, name, commandExecutor);
+        scheduledRemoteService = new ScheduledTasksService(codec, name, commandExecutor, executorId, responses);
         scheduledRemoteService.setTerminationTopicName(terminationTopic.getChannelNames().get(0));
         scheduledRemoteService.setTasksCounterName(tasksCounterName);
         scheduledRemoteService.setStatusName(statusName);
         scheduledRemoteService.setSchedulerQueueName(schedulerQueueName);
         scheduledRemoteService.setSchedulerChannelName(schedulerChannelName);
-        scheduledRemoteService.setSchedulerTasksName(schedulerTasksName);
-        asyncScheduledService = scheduledRemoteService.get(RemoteExecutorServiceAsync.class, RemoteInvocationOptions.defaults().noAck().expectResultWithin(1, TimeUnit.DAYS));
+        scheduledRemoteService.setTasksName(tasksName);
+        scheduledRemoteService.setTasksRetryIntervalName(tasksRetryIntervalName);
+        scheduledRemoteService.setTasksRetryInterval(options.getTaskRetryInterval());
+        asyncScheduledService = scheduledRemoteService.get(RemoteExecutorServiceAsync.class, RESULT_OPTIONS);
         asyncScheduledServiceAtFixed = scheduledRemoteService.get(RemoteExecutorServiceAsync.class, RemoteInvocationOptions.defaults().noAck().noResult());
+    }
+    
+    protected String generateRequestId() {
+        byte[] id = new byte[16];
+        ThreadLocalRandom.current().nextBytes(id);
+        return ByteBufUtil.hexDump(id);
+    }
+
+    @Override
+    public int getTaskCount() {
+        return commandExecutor.get(getTaskCountAsync());
+    }
+
+    @Override
+    public RFuture<Integer> getTaskCountAsync() {
+        return commandExecutor.readAsync(getName(), LongCodec.INSTANCE, RedisCommands.GET_INTEGER, tasksCounterName);
+    }
+
+    @Override
+    public boolean hasTask(String taskId) {
+        return commandExecutor.get(hasTaskAsync(taskId));
+    }
+
+    @Override
+    public Set<String> getTaskIds() {
+        return commandExecutor.get(getTaskIdsAsync());
+    }
+
+    @Override
+    public RFuture<Set<String>> getTaskIdsAsync() {
+        return commandExecutor.writeAsync(tasksName, StringCodec.INSTANCE, RedisCommands.HKEYS, tasksName);
+    }
+
+    @Override
+    public RFuture<Boolean> hasTaskAsync(String taskId) {
+        return commandExecutor.writeAsync(tasksName, LongCodec.INSTANCE, RedisCommands.HEXISTS, tasksName, taskId);
+    }
+
+    @Override
+    public int countActiveWorkers() {
+        String id = generateRequestId();
+        int subscribers = (int) workersTopic.publish(id);
+        if (subscribers == 0) {
+            return 0;
+        }
+
+        RSemaphore semaphore = redisson.getSemaphore(workersSemaphoreName + ":" + id);
+        try {
+            semaphore.tryAcquire(subscribers, 10, TimeUnit.MINUTES);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        RAtomicLong atomicLong = redisson.getAtomicLong(workersCounterName + ":" + id);
+        long result = atomicLong.get();
+        redisson.getKeys().delete(semaphore, atomicLong);
+        return (int) result;
     }
     
     @Override
     public void registerWorkers(int workers) {
-        registerWorkers(workers, commandExecutor.getConnectionManager().getExecutor());
+        registerWorkers(WorkerOptions.defaults().workers(workers));
     }
     
     @Override
-    public void registerWorkers(int workers, ExecutorService executor) {
-        QueueTransferTask scheduler = new QueueTransferTask(connectionManager) {
+    public void registerWorkers(WorkerOptions options) {
+        if (options.getWorkers() == 0) {
+            throw new IllegalArgumentException("workers amount can't be zero");
+        }
+        
+        QueueTransferTask task = new QueueTransferTask(connectionManager) {
             @Override
-            protected RTopic<Long> getTopic() {
-                return new RedissonTopic<Long>(LongCodec.INSTANCE, commandExecutor, schedulerChannelName);
+            protected RTopic getTopic() {
+                return new RedissonTopic(LongCodec.INSTANCE, commandExecutor, schedulerChannelName);
             }
 
             @Override
             protected RFuture<Long> pushTaskAsync() {
                 return commandExecutor.evalWriteAsync(name, LongCodec.INSTANCE, RedisCommands.EVAL_LONG,
                         "local expiredTaskIds = redis.call('zrangebyscore', KEYS[2], 0, ARGV[1], 'limit', 0, ARGV[2]); "
+                      + "local retryInterval = redis.call('get', KEYS[4]);"
                       + "if #expiredTaskIds > 0 then "
                           + "redis.call('zrem', KEYS[2], unpack(expiredTaskIds));"
-                          + "local expiredTasks = redis.call('hmget', KEYS[3], unpack(expiredTaskIds));"
-                          + "redis.call('rpush', KEYS[1], unpack(expiredTasks));"
+                          + "if retryInterval ~= false then "
+                              + "local startTime = tonumber(ARGV[1]) + tonumber(retryInterval);"
+                          
+                              + "for i = 1, #expiredTaskIds, 1 do "
+                                  + "local name = expiredTaskIds[i];"
+                                  + "local scheduledName = expiredTaskIds[i];"
+                                  + "if string.sub(scheduledName, 1, 2) ~= 'ff' then "
+                                      + "scheduledName = 'ff' .. scheduledName; "
+                                  + "else "
+                                      + "name = string.sub(name, 3, string.len(name)); "
+                                  + "end;"
+                                      
+                                  + "redis.call('zadd', KEYS[2], startTime, scheduledName);"
+                                  + "local v = redis.call('zrange', KEYS[2], 0, 0); "
+                                  // if new task added to queue head then publish its startTime 
+                                  // to all scheduler workers 
+                                  + "if v[1] == expiredTaskIds[i] then "
+                                      + "redis.call('publish', KEYS[3], startTime); "
+                                  + "end;"
+                                    
+                                + "if redis.call('linsert', KEYS[1], 'before', name, name) < 1 then "
+                                    + "redis.call('rpush', KEYS[1], name); "
+                                + "else "
+                                    + "redis.call('lrem', KEYS[1], -1, name); "
+                                + "end; "
+                              + "end; "
+                          + "else "
+                              + "redis.call('rpush', KEYS[1], unpack(expiredTaskIds));"
+                          + "end; "
                       + "end; "
                         // get startTime from scheduler queue head task
                       + "local v = redis.call('zrange', KEYS[2], 0, 0, 'WITHSCORES'); "
@@ -170,78 +287,188 @@ public class RedissonExecutorService implements RScheduledExecutorService {
                          + "return v[2]; "
                       + "end "
                       + "return nil;",
-                      Arrays.<Object>asList(requestQueueName, schedulerQueueName, schedulerTasksName), 
-                      System.currentTimeMillis(), 100);
+                      Arrays.<Object>asList(requestQueueName, schedulerQueueName, schedulerChannelName, tasksRetryIntervalName), 
+                      System.currentTimeMillis(), 50);
             }
         };
-        scheduler.start();
+        queueTransferService.schedule(getName(), task);
         
-        RemoteExecutorServiceImpl service = 
-                new RemoteExecutorServiceImpl(commandExecutor, redisson, codec, requestQueueName);
+        TasksRunnerService service = 
+                new TasksRunnerService(commandExecutor, redisson, codec, requestQueueName, responses);
         service.setStatusName(statusName);
         service.setTasksCounterName(tasksCounterName);
+        service.setTasksName(tasksName);
         service.setTerminationTopicName(terminationTopic.getChannelNames().get(0));
-        service.setSchedulerTasksName(schedulerTasksName);
         service.setSchedulerChannelName(schedulerChannelName);
         service.setSchedulerQueueName(schedulerQueueName);
+        service.setTasksRetryIntervalName(tasksRetryIntervalName);
+        service.setBeanFactory(options.getBeanFactory());
         
-        redisson.getRemoteService(name, codec).register(RemoteExecutorService.class, service, workers, executor);
+        ExecutorService es = commandExecutor.getConnectionManager().getExecutor();
+        if (options.getExecutorService() != null) {
+            es = options.getExecutorService();
+        }
+        
+        remoteService.register(RemoteExecutorService.class, service, options.getWorkers(), es);
+        workersGroupListenerId = workersTopic.addListener(String.class, new MessageListener<String>() {
+            @Override
+            public void onMessage(CharSequence channel, String id) {
+                redisson.getAtomicLong(workersCounterName + ":" + id).getAndAdd(options.getWorkers());
+                redisson.getSemaphore(workersSemaphoreName + ":" + id).release();
+            }
+        });
     }
-
+    
+    @Override
+    public void registerWorkers(int workers, ExecutorService executor) {
+        registerWorkers(WorkerOptions.defaults().workers(workers).executorService(executor));
+    }
+    
     @Override
     public void execute(Runnable task) {
         check(task);
-        byte[] classBody = getClassBody(task);
-        byte[] state = encode(task);
-        RemotePromise<Void> promise = (RemotePromise<Void>)asyncServiceWithoutResult.executeRunnable(task.getClass().getName(), classBody, state);
-        execute(promise);
+        RemotePromise<Void> promise = (RemotePromise<Void>) asyncServiceWithoutResult.executeRunnable(
+                                            createTaskParameters(task));
+        syncExecute(promise);
+    }
+    
+    @Override
+    public void execute(Runnable...tasks) {
+        if (tasks.length == 0) {
+            throw new NullPointerException("Tasks are not defined");
+        }
+
+        TasksBatchService executorRemoteService = createBatchService();
+        RemoteExecutorServiceAsync asyncServiceWithoutResult = executorRemoteService.get(RemoteExecutorServiceAsync.class, RemoteInvocationOptions.defaults().noAck().noResult());
+        for (Runnable task : tasks) {
+            check(task);
+            asyncServiceWithoutResult.executeRunnable(createTaskParameters(task));
+        }
+        
+        List<Boolean> result = (List<Boolean>) executorRemoteService.executeAdd();
+        if (!result.get(0)) {
+            throw new RejectedExecutionException("Tasks have been rejected. ExecutorService is in shutdown state");
+        }
+    }
+
+    private TasksBatchService createBatchService() {
+        TasksBatchService executorRemoteService = new TasksBatchService(codec, name, commandExecutor, executorId, responses);
+        executorRemoteService.setTasksExpirationTimeName(tasksExpirationTimeName);
+        executorRemoteService.setTerminationTopicName(terminationTopic.getChannelNames().get(0));
+        executorRemoteService.setTasksCounterName(tasksCounterName);
+        executorRemoteService.setStatusName(statusName);
+        executorRemoteService.setTasksName(tasksName);
+        executorRemoteService.setSchedulerChannelName(schedulerChannelName);
+        executorRemoteService.setSchedulerQueueName(schedulerQueueName);
+        executorRemoteService.setTasksRetryIntervalName(tasksRetryIntervalName);
+        return executorRemoteService;
     }
     
     private byte[] encode(Object task) {
         // erase RedissonClient field to avoid its serialization
-        Field[] fields = task.getClass().getDeclaredFields();
-        for (Field field : fields) {
-            if (RedissonClient.class.isAssignableFrom(field.getType())
-                    && field.isAnnotationPresent(RInject.class)) {
-                field.setAccessible(true);
-                try {
-                    field.set(task, null);
-                } catch (IllegalAccessException e) {
-                    throw new IllegalStateException(e);
-                }
-            }
-        }
+        Injector.inject(task, null);
         
+        ByteBuf buf = null;
         try {
-            return codec.getValueEncoder().encode(task);
+            buf = codec.getValueEncoder().encode(task);
+            byte[] dst = new byte[buf.readableBytes()];
+            buf.readBytes(dst);
+            return dst;
         } catch (IOException e) {
             throw new IllegalArgumentException(e);
+        } finally {
+            if (buf != null) {
+                buf.release();
+            }
         }
     }
+    
+    public static class ClassBody {
+        
+        private byte[] lambda;
+        private byte[] clazz;
+        private String clazzName;
+        
+        public ClassBody(byte[] lambda, byte[] clazz, String clazzName) {
+            super();
+            this.lambda = lambda;
+            this.clazz = clazz;
+            this.clazzName = clazzName;
+        }
+        
+        public String getClazzName() {
+            return clazzName;
+        }
+        
+        public byte[] getClazz() {
+            return clazz;
+        }
+        
+        public byte[] getLambda() {
+            return lambda;
+        }
+        
+    }
 
-    private byte[] getClassBody(Object task) {
+    private ClassBody getClassBody(Object task) {
         Class<?> c = task.getClass();
-        byte[] classBody = class2bytes.get(c);
-        if (classBody == null) {
+        ClassBody result = class2body.get(c);
+        if (result == null) {
             String className = c.getName();
             String classAsPath = className.replace('.', '/') + ".class";
             InputStream classStream = c.getClassLoader().getResourceAsStream(classAsPath);
             
-            DataInputStream s = new DataInputStream(classStream);
+            byte[] lambdaBody = null;
+            if (classStream == null) {
+                ByteArrayOutputStream os = new ByteArrayOutputStream();
+                try {
+                    ObjectOutput oo = new ObjectOutputStream(os);
+                    oo.writeObject(task);
+                } catch (Exception e) {
+                    throw new IllegalArgumentException("Unable to serialize lambda", e);
+                }
+                lambdaBody = os.toByteArray();
+                
+                SerializedLambda lambda;
+                try {
+                    Method writeReplace = task.getClass().getDeclaredMethod("writeReplace");
+                    writeReplace.setAccessible(true);
+                    lambda = (SerializedLambda) writeReplace.invoke(task);
+                } catch (Exception ex) {
+                    throw new IllegalArgumentException("Lambda should implement java.io.Serializable interface", ex);
+                }
+                
+                className = lambda.getCapturingClass().replace('/', '.');
+                classStream = task.getClass().getClassLoader().getResourceAsStream(lambda.getCapturingClass() + ".class");
+            }
+            
+            byte[] classBody;
             try {
+                DataInputStream s = new DataInputStream(classStream);
                 classBody = new byte[s.available()];
                 s.readFully(classBody);
             } catch (IOException e) {
                 throw new IllegalArgumentException(e);
+            } finally {
+                try {
+                    classStream.close();
+                } catch (IOException e) {
+                    // skip
+                }
             }
             
-            class2bytes.put(c, classBody);
+            result = new ClassBody(lambdaBody, classBody, className);
+            class2body.put(c, result);
         }
-        return classBody;
+        return result;
     }
 
     @Override
     public void shutdown() {
+        queueTransferService.remove(getName());
+        remoteService.deregister(RemoteExecutorService.class);
+        workersTopic.removeListener(workersGroupListenerId);
+        
         commandExecutor.evalWrite(getName(), LongCodec.INSTANCE, RedisCommands.EVAL_VOID,
                 "if redis.call('exists', KEYS[2]) == 0 then "
                      + "if redis.call('get', KEYS[1]) == '0' or redis.call('exists', KEYS[1]) == 0 then "
@@ -251,7 +478,7 @@ public class RedissonExecutorService implements RScheduledExecutorService {
                         + "redis.call('set', KEYS[2], ARGV[1]);"
                      + "end;"
                 + "end;", 
-                Arrays.<Object>asList(tasksCounterName, statusName, terminationTopic.getChannelNames().get(0)),
+                Arrays.<Object>asList(tasksCounterName, statusName, terminationTopic.getChannelNames().get(0), tasksRetryIntervalName),
                 SHUTDOWN_STATE, TERMINATED_STATE);
     }
 
@@ -267,19 +494,16 @@ public class RedissonExecutorService implements RScheduledExecutorService {
     
     @Override
     public RFuture<Boolean> deleteAsync() {
-        final RPromise<Boolean> result = connectionManager.newPromise();
+        RPromise<Boolean> result = new RedissonPromise<Boolean>();
         RFuture<Long> deleteFuture = redisson.getKeys().deleteAsync(
-                requestQueueName, statusName, tasksCounterName, schedulerQueueName, schedulerTasksName);
-        deleteFuture.addListener(new FutureListener<Long>() {
-            @Override
-            public void operationComplete(io.netty.util.concurrent.Future<Long> future) throws Exception {
-                if (!future.isSuccess()) {
-                    result.tryFailure(future.cause());
-                    return;
-                }
-                
-                result.trySuccess(future.getNow() > 0);
+                requestQueueName, statusName, tasksCounterName, schedulerQueueName, tasksName, tasksRetryIntervalName);
+        deleteFuture.onComplete((res, e) -> {
+            if (e != null) {
+                result.tryFailure(e);
+                return;
             }
+            
+            result.trySuccess(res > 0);
         });
         return result;
     }
@@ -315,16 +539,16 @@ public class RedissonExecutorService implements RScheduledExecutorService {
             return true;
         }
         
-        final CountDownLatch latch = new CountDownLatch(1);
-        MessageListener<Integer> listener = new MessageListener<Integer>() {
+        CountDownLatch latch = new CountDownLatch(1);
+        MessageListener<Long> listener = new MessageListener<Long>() {
             @Override
-            public void onMessage(String channel, Integer msg) {
+            public void onMessage(CharSequence channel, Long msg) {
                 if (msg == TERMINATED_STATE) {
                     latch.countDown();
                 }
             }
         };
-        int listenerId = terminationTopic.addListener(listener);
+        int listenerId = terminationTopic.addListener(Long.class, listener);
 
         if (isTerminated()) {
             terminationTopic.removeListener(listenerId);
@@ -337,35 +561,121 @@ public class RedissonExecutorService implements RScheduledExecutorService {
     }
 
     @Override
-    public <T> Future<T> submit(Callable<T> task) {
-        RemotePromise<T> promise = (RemotePromise<T>) submitAsync(task);
-        execute(promise);
-        return promise;
+    public <T> RExecutorFuture<T> submit(Callable<T> task) {
+        RemotePromise<T> promise = (RemotePromise<T>) ((PromiseDelegator<T>) submitAsync(task)).getInnerPromise();
+        syncExecute(promise);
+        return createFuture(promise);
+    }
+
+    @Override
+    public <T> RExecutorFuture<T> submit(Callable<T> task, long timeToLive, TimeUnit timeUnit) {
+        RemotePromise<T> promise = (RemotePromise<T>) ((PromiseDelegator<T>) submitAsync(task, timeToLive, timeUnit)).getInnerPromise();
+        syncExecute(promise);
+        return createFuture(promise);
+    }
+
+    @Override
+    public <T> RExecutorFuture<T> submitAsync(Callable<T> task, long timeToLive, TimeUnit timeUnit) {
+        check(task);
+        TaskParameters taskParameters = createTaskParameters(task);
+        taskParameters.setTtl(timeUnit.toMillis(timeToLive));
+        RemotePromise<T> result = (RemotePromise<T>) asyncService.executeCallable(taskParameters);
+        addListener(result);
+        return createFuture(result);
+    }
+
+    @Override
+    public <T> RExecutorFuture<T> submitAsync(Callable<T> task) {
+        check(task);
+        RemotePromise<T> result = (RemotePromise<T>) asyncService.executeCallable(createTaskParameters(task));
+        addListener(result);
+        return createFuture(result);
     }
     
-    public <T> RFuture<T> submitAsync(Callable<T> task) {
-        check(task);
-        byte[] classBody = getClassBody(task);
-        byte[] state = encode(task);
-        RemotePromise<T> result = (RemotePromise<T>) asyncService.executeCallable(task.getClass().getName(), classBody, state);
-        addListener(result);
-        return result;
+    @Override
+    public RExecutorBatchFuture submit(Callable<?>...tasks) {
+        if (tasks.length == 0) {
+            throw new NullPointerException("Tasks are not defined");
+        }
+
+        List<RExecutorFuture<?>> result = new ArrayList<>();
+        TasksBatchService executorRemoteService = createBatchService();
+        RemoteExecutorServiceAsync asyncService = executorRemoteService.get(RemoteExecutorServiceAsync.class, RESULT_OPTIONS);
+        for (Callable<?> task : tasks) {
+            check(task);
+            RemotePromise<?> promise = (RemotePromise<?>) asyncService.executeCallable(createTaskParameters(task));
+            RedissonExecutorFuture<?> executorFuture = new RedissonExecutorFuture(promise);
+            result.add(executorFuture);
+        }
+        
+        List<Boolean> addResult = (List<Boolean>) executorRemoteService.executeAdd();
+        if (!addResult.get(0)) {
+            throw new RejectedExecutionException("Tasks have been rejected. ExecutorService is in shutdown state");
+        }
+        
+        return new RedissonExecutorBatchFuture(result);
     }
 
-    private <T> void addListener(final RemotePromise<T> result) {
-        result.getAddFuture().addListener(new FutureListener<Boolean>() {
+    protected TaskParameters createTaskParameters(Callable<?> task) {
+        ClassBody classBody = getClassBody(task);
+        byte[] state = encode(task);
+        return new TaskParameters(classBody.getClazzName(), classBody.getClazz(), classBody.getLambda(), state);
+    }
+    
+    protected TaskParameters createTaskParameters(Runnable task) {
+        ClassBody classBody = getClassBody(task);
+        byte[] state = encode(task);
+        return new TaskParameters(classBody.getClazzName(), classBody.getClazz(), classBody.getLambda(), state);
+    }
 
-            @Override
-            public void operationComplete(io.netty.util.concurrent.Future<Boolean> future) throws Exception {
-                if (!future.isSuccess()) {
-                    result.tryFailure(future.cause());
-                    return;
+    @Override
+    public RExecutorBatchFuture submitAsync(Callable<?>...tasks) {
+        if (tasks.length == 0) {
+            throw new NullPointerException("Tasks are not defined");
+        }
+
+        TasksBatchService executorRemoteService = createBatchService();
+        RemoteExecutorServiceAsync asyncService = executorRemoteService.get(RemoteExecutorServiceAsync.class, RESULT_OPTIONS);
+        List<RExecutorFuture<?>> result = new ArrayList<>();
+        for (Callable<?> task : tasks) {
+            check(task);
+            RemotePromise<?> promise = (RemotePromise<?>) asyncService.executeCallable(createTaskParameters(task));
+            RedissonExecutorFuture<?> executorFuture = new RedissonExecutorFuture(promise);
+            result.add(executorFuture);
+        }
+        
+        executorRemoteService.executeAddAsync().onComplete((res, e) -> {
+            if (e != null) {
+                for (RExecutorFuture<?> executorFuture : result) {
+                    ((RPromise<Void>) executorFuture).tryFailure(e);
                 }
-                
-                if (!future.getNow()) {
-                    result.tryFailure(new RejectedExecutionException("Task rejected. ExecutorService is in shutdown state"));
+                return;
+            }
+            
+            for (Boolean bool : res) {
+                if (!bool) {
+                    RejectedExecutionException ex = new RejectedExecutionException("Task rejected. ExecutorService is in shutdown state");
+                    for (RExecutorFuture<?> executorFuture : result) {
+                        ((RPromise<Void>) executorFuture).tryFailure(ex);
+                    }
+                    break;
                 }
-                
+            }
+        });
+
+        return new RedissonExecutorBatchFuture(result);
+    }
+
+
+    private <T> void addListener(RemotePromise<T> result) {
+        result.getAddFuture().onComplete((res, e) -> {
+            if (e != null) {
+                result.tryFailure(e);
+                return;
+            }
+            
+            if (!res) {
+                result.tryFailure(new RejectedExecutionException("Task rejected. ExecutorService is in shutdown state"));
             }
         });
     }
@@ -383,7 +693,7 @@ public class RedissonExecutorService implements RScheduledExecutorService {
         }
     }
 
-    private <T> void execute(RemotePromise<T> promise) {
+    private <T> void syncExecute(RemotePromise<T> promise) {
         RFuture<Boolean> addFuture = promise.getAddFuture();
         addFuture.syncUninterruptibly();
         Boolean res = addFuture.getNow();
@@ -393,218 +703,318 @@ public class RedissonExecutorService implements RScheduledExecutorService {
     }
 
     @Override
-    public <T> RFuture<T> submit(Runnable task, final T result) {
-        final RPromise<T> resultFuture = connectionManager.newPromise();
-        RFuture<Object> future = (RFuture<Object>) submit(task);
-        future.addListener(new FutureListener<Object>() {
-            @Override
-            public void operationComplete(io.netty.util.concurrent.Future<Object> future) throws Exception {
-                if (!future.isSuccess()) {
-                    resultFuture.tryFailure(future.cause());
-                    return;
-                }
-                resultFuture.trySuccess(result);
+    public <T> RExecutorFuture<T> submit(Runnable task, T result) {
+        RPromise<T> resultFuture = new RedissonPromise<T>();
+        RemotePromise<T> future = (RemotePromise<T>) ((PromiseDelegator<T>) submit(task)).getInnerPromise();
+        future.onComplete((res, e) -> {
+            if (e != null) {
+                resultFuture.tryFailure(e);
+                return;
             }
+            resultFuture.trySuccess(result);
         });
-        return resultFuture;
+        return new RedissonExecutorFuture<T>(resultFuture, future.getRequestId());
     }
 
     @Override
-    public Future<?> submit(Runnable task) {
-        RemotePromise<Void> promise = (RemotePromise<Void>) submitAsync(task);
-        execute(promise);
-        return promise;
+    public RExecutorBatchFuture submit(Runnable...tasks) {
+        if (tasks.length == 0) {
+            throw new NullPointerException("Tasks are not defined");
+        }
+
+        List<RExecutorFuture<?>> result = new ArrayList<>();
+        TasksBatchService executorRemoteService = createBatchService();
+        RemoteExecutorServiceAsync asyncService = executorRemoteService.get(RemoteExecutorServiceAsync.class, RESULT_OPTIONS);
+        for (Runnable task : tasks) {
+            check(task);
+            RemotePromise<Void> promise = (RemotePromise<Void>) asyncService.executeRunnable(createTaskParameters(task));
+            RedissonExecutorFuture<Void> executorFuture = new RedissonExecutorFuture<Void>(promise);
+            result.add(executorFuture);
+        }
+        
+        List<Boolean> addResult = (List<Boolean>) executorRemoteService.executeAdd();
+        if (!addResult.get(0)) {
+            throw new RejectedExecutionException("Tasks have been rejected. ExecutorService is in shutdown state");
+        }
+        
+        return new RedissonExecutorBatchFuture(result);
     }
     
     @Override
-    public RFuture<?> submitAsync(Runnable task) {
+    public RExecutorBatchFuture submitAsync(Runnable...tasks) {
+        if (tasks.length == 0) {
+            throw new NullPointerException("Tasks are not defined");
+        }
+
+        TasksBatchService executorRemoteService = createBatchService();
+        RemoteExecutorServiceAsync asyncService = executorRemoteService.get(RemoteExecutorServiceAsync.class, RESULT_OPTIONS);
+        List<RExecutorFuture<?>> result = new ArrayList<>();
+        for (Runnable task : tasks) {
+            check(task);
+            RemotePromise<Void> promise = (RemotePromise<Void>) asyncService.executeRunnable(createTaskParameters(task));
+            RedissonExecutorFuture<Void> executorFuture = new RedissonExecutorFuture<Void>(promise);
+            result.add(executorFuture);
+        }
+        
+        executorRemoteService.executeAddAsync().onComplete((res, e) -> {
+            if (e != null) {
+                for (RExecutorFuture<?> executorFuture : result) {
+                    ((RPromise<Void>) executorFuture).tryFailure(e);
+                }
+                return;
+            }
+            
+            for (Boolean bool : res) {
+                if (!bool) {
+                    RejectedExecutionException ex = new RejectedExecutionException("Task rejected. ExecutorService is in shutdown state");
+                    for (RExecutorFuture<?> executorFuture : result) {
+                        ((RPromise<Void>) executorFuture).tryFailure(ex);
+                    }
+                    break;
+                }
+            }
+        });
+
+        return new RedissonExecutorBatchFuture(result);
+    }
+
+    
+    @Override
+    public RExecutorFuture<?> submit(Runnable task) {
+        RemotePromise<Void> promise = (RemotePromise<Void>) ((PromiseDelegator<Void>) submitAsync(task)).getInnerPromise();
+        syncExecute(promise);
+        return createFuture(promise);
+    }
+
+    @Override
+    public RExecutorFuture<?> submit(Runnable task, long timeToLive, TimeUnit timeUnit) {
+        RemotePromise<Void> promise = (RemotePromise<Void>) ((PromiseDelegator<Void>) submitAsync(task, timeToLive, timeUnit)).getInnerPromise();
+        syncExecute(promise);
+        return createFuture(promise);
+    }
+
+    @Override
+    public RExecutorFuture<?> submitAsync(Runnable task, long timeToLive, TimeUnit timeUnit) {
         check(task);
-        byte[] classBody = getClassBody(task);
-        byte[] state = encode(task);
-        RemotePromise<Void> result = (RemotePromise<Void>) asyncService.executeRunnable(task.getClass().getName(), classBody, state);
+        TaskParameters taskParameters = createTaskParameters(task);
+        taskParameters.setTtl(timeUnit.toMillis(timeToLive));
+        RemotePromise<Void> result = (RemotePromise<Void>) asyncService.executeRunnable(taskParameters);
         addListener(result);
-        return result;
+        return createFuture(result);
+    }
+
+    @Override
+    public RExecutorFuture<?> submitAsync(Runnable task) {
+        check(task);
+        RemotePromise<Void> result = (RemotePromise<Void>) asyncService.executeRunnable(createTaskParameters(task));
+        addListener(result);
+        return createFuture(result);
+    }
+    
+    private void cancelResponseHandling(RequestId requestId) {
+        synchronized (responses) {
+            ResponseEntry entry = responses.get(responseQueueName);
+            if (entry == null) {
+                return;
+            }
+            
+            List<Result> list = entry.getResponses().remove(requestId);
+            if (list != null) {
+                for (Result result : list) {
+                    result.getScheduledFuture().cancel(true);
+                }
+            }
+            if (entry.getResponses().isEmpty()) {
+                responses.remove(responseQueueName, entry);
+            }
+        }
     }
     
     @Override
-    public ScheduledFuture<?> schedule(Runnable task, long delay, TimeUnit unit) {
+    public RScheduledFuture<?> schedule(Runnable task, long delay, TimeUnit unit) {
         RedissonScheduledFuture<?> future = (RedissonScheduledFuture<?>) scheduleAsync(task, delay, unit);
-        execute((RemotePromise<?>)future.getInnerPromise());
+        RemotePromise<?> rp = (RemotePromise<?>) future.getInnerPromise();
+        syncExecute(rp);
         return future;
+    }
+
+    private <T> RExecutorFuture<T> createFuture(RemotePromise<T> promise) {
+        RExecutorFuture<T> f = new RedissonExecutorFuture<T>(promise);
+        storeReference(f, promise.getRequestId());
+        return f;
+    }
+    
+    private <T> RScheduledFuture<T> createFuture(RemotePromise<T> promise, long scheduledExecutionTime) {
+        RedissonScheduledFuture<T> f = new RedissonScheduledFuture<T>(promise, scheduledExecutionTime);
+        storeReference(f, promise.getRequestId());
+        return f;
+    }
+    
+    private void storeReference(RExecutorFuture<?> future, RequestId requestId) {
+        while (true) {
+            RedissonExecutorFutureReference r = (RedissonExecutorFutureReference) referenceDueue.poll();
+            if (r == null) {
+                break;
+            }
+            references.remove(r);
+            
+            if (!r.getPromise().hasListeners()) {
+                cancelResponseHandling(r.getRequestId());
+            }
+        }
+        
+        RPromise<?> promise = ((PromiseDelegator<?>) future).getInnerPromise();
+        RedissonExecutorFutureReference reference = new RedissonExecutorFutureReference(requestId, future, referenceDueue, promise);
+        references.add(reference);
     }
     
     @Override
     public RScheduledFuture<?> scheduleAsync(Runnable task, long delay, TimeUnit unit) {
         check(task);
-        byte[] classBody = getClassBody(task);
+        ClassBody classBody = getClassBody(task);
         byte[] state = encode(task);
         long startTime = System.currentTimeMillis() + unit.toMillis(delay);
-        RemotePromise<Void> result = (RemotePromise<Void>) asyncScheduledService.scheduleRunnable(task.getClass().getName(), classBody, state, startTime);
+        RemotePromise<Void> result = (RemotePromise<Void>) asyncScheduledService.scheduleRunnable(new ScheduledParameters(classBody.getClazzName(), classBody.getClazz(), classBody.getLambda(), state, startTime));
         addListener(result);
-        return new RedissonScheduledFuture<Void>(result, startTime);
+        
+        return createFuture(result, startTime);
     }
     
     @Override
-    public <V> ScheduledFuture<V> schedule(Callable<V> task, long delay, TimeUnit unit) {
+    public <V> RScheduledFuture<V> schedule(Callable<V> task, long delay, TimeUnit unit) {
         RedissonScheduledFuture<V> future = (RedissonScheduledFuture<V>) scheduleAsync(task, delay, unit);
-        execute((RemotePromise<V>)future.getInnerPromise());
+        RemotePromise<?> rp = (RemotePromise<?>) future.getInnerPromise();
+        syncExecute(rp);
         return future;
     }
     
     @Override
     public <V> RScheduledFuture<V> scheduleAsync(Callable<V> task, long delay, TimeUnit unit) {
         check(task);
-        byte[] classBody = getClassBody(task);
+        ClassBody classBody = getClassBody(task);
         byte[] state = encode(task);
         long startTime = System.currentTimeMillis() + unit.toMillis(delay);
-        RemotePromise<V> result = (RemotePromise<V>) asyncScheduledService.scheduleCallable(task.getClass().getName(), classBody, state, startTime);
+        RemotePromise<V> result = (RemotePromise<V>) asyncScheduledService.scheduleCallable(new ScheduledParameters(classBody.getClazzName(), classBody.getClazz(), classBody.getLambda(), state, startTime));
         addListener(result);
-        return new RedissonScheduledFuture<V>(result, startTime);
+        return createFuture(result, startTime);
     }
     
     @Override
-    public ScheduledFuture<?> scheduleAtFixedRate(Runnable task, long initialDelay, long period, TimeUnit unit) {
+    public RScheduledFuture<?> scheduleAtFixedRate(Runnable task, long initialDelay, long period, TimeUnit unit) {
         RedissonScheduledFuture<?> future = (RedissonScheduledFuture<?>) scheduleAtFixedRateAsync(task, initialDelay, period, unit);
-        execute((RemotePromise<?>)future.getInnerPromise());
+        RemotePromise<?> rp = (RemotePromise<?>) future.getInnerPromise();
+        syncExecute(rp);
         return future;
     }
     
     @Override
     public RScheduledFuture<?> scheduleAtFixedRateAsync(Runnable task, long initialDelay, long period, TimeUnit unit) {
         check(task);
-        byte[] classBody = getClassBody(task);
+        ClassBody classBody = getClassBody(task);
         byte[] state = encode(task);
         long startTime = System.currentTimeMillis() + unit.toMillis(initialDelay);
-        RemotePromise<Void> result = (RemotePromise<Void>) asyncScheduledServiceAtFixed.scheduleAtFixedRate(task.getClass().getName(), classBody, state, startTime, unit.toMillis(period));
+        ScheduledAtFixedRateParameters params = new ScheduledAtFixedRateParameters();
+        params.setClassName(classBody.getClazzName());
+        params.setClassBody(classBody.getClazz());
+        params.setLambdaBody(classBody.getLambda());
+        params.setState(state);
+        params.setStartTime(startTime);
+        params.setPeriod(unit.toMillis(period));
+        params.setExecutorId(executorId);
+        RemotePromise<Void> result = (RemotePromise<Void>) asyncScheduledServiceAtFixed.scheduleAtFixedRate(params);
         addListener(result);
-        return new RedissonScheduledFuture<Void>(result, startTime);
+        return createFuture(result, startTime);
     }
 
     @Override
     public RScheduledFuture<?> schedule(Runnable task, CronSchedule cronSchedule) {
         RedissonScheduledFuture<?> future = (RedissonScheduledFuture<?>) scheduleAsync(task, cronSchedule);
-        execute((RemotePromise<?>)future.getInnerPromise());
+        RemotePromise<?> rp = (RemotePromise<?>) future.getInnerPromise();
+        syncExecute(rp);
         return future;
     }
     
     @Override
     public RScheduledFuture<?> scheduleAsync(Runnable task, CronSchedule cronSchedule) {
         check(task);
-        byte[] classBody = getClassBody(task);
+        ClassBody classBody = getClassBody(task);
         byte[] state = encode(task);
-        final Date startDate = cronSchedule.getExpression().getNextValidTimeAfter(new Date());
+        Date startDate = cronSchedule.getExpression().getNextValidTimeAfter(new Date());
+        if (startDate == null) {
+            throw new IllegalArgumentException("Wrong cron expression! Unable to calculate start date");
+        }
         long startTime = startDate.getTime();
-        RemotePromise<Void> result = (RemotePromise<Void>) asyncScheduledServiceAtFixed.schedule(task.getClass().getName(), classBody, state, startTime, cronSchedule.getExpression().getCronExpression());
+        
+        ScheduledCronExpressionParameters params = new ScheduledCronExpressionParameters();
+        params.setClassName(classBody.getClazzName());
+        params.setClassBody(classBody.getClazz());
+        params.setLambdaBody(classBody.getLambda());
+        params.setState(state);
+        params.setStartTime(startTime);
+        params.setCronExpression(cronSchedule.getExpression().getCronExpression());
+        params.setTimezone(cronSchedule.getExpression().getTimeZone().getID());
+        params.setExecutorId(executorId);
+        RemotePromise<Void> result = (RemotePromise<Void>) asyncScheduledServiceAtFixed.schedule(params);
         addListener(result);
-        return new RedissonScheduledFuture<Void>(result, startTime) {
+        RedissonScheduledFuture<Void> f = new RedissonScheduledFuture<Void>(result, startTime) {
             public long getDelay(TimeUnit unit) {
                 return unit.convert(startDate.getTime() - System.currentTimeMillis(), TimeUnit.MILLISECONDS);
             };
         };
+        storeReference(f, result.getRequestId());
+        return f;
     }
     
     @Override
-    public ScheduledFuture<?> scheduleWithFixedDelay(Runnable task, long initialDelay, long delay, TimeUnit unit) {
+    public RScheduledFuture<?> scheduleWithFixedDelay(Runnable task, long initialDelay, long delay, TimeUnit unit) {
         RedissonScheduledFuture<?> future = (RedissonScheduledFuture<?>) scheduleWithFixedDelayAsync(task, initialDelay, delay, unit);
-        execute((RemotePromise<?>)future.getInnerPromise());
+        RemotePromise<?> rp = (RemotePromise<?>) future.getInnerPromise();
+        syncExecute(rp);
         return future;
     }
     
     @Override
     public RScheduledFuture<?> scheduleWithFixedDelayAsync(Runnable task, long initialDelay, long delay, TimeUnit unit) {
         check(task);
-        byte[] classBody = getClassBody(task);
+        ClassBody classBody = getClassBody(task);
         byte[] state = encode(task);
         long startTime = System.currentTimeMillis() + unit.toMillis(initialDelay);
-        RemotePromise<Void> result = (RemotePromise<Void>) asyncScheduledServiceAtFixed.scheduleWithFixedDelay(task.getClass().getName(), classBody, state, startTime, unit.toMillis(delay));
+        
+        ScheduledWithFixedDelayParameters params = new ScheduledWithFixedDelayParameters();
+        params.setClassName(classBody.getClazzName());
+        params.setClassBody(classBody.getClazz());
+        params.setLambdaBody(classBody.getLambda());
+        params.setState(state);
+        params.setStartTime(startTime);
+        params.setDelay(unit.toMillis(delay));
+        params.setExecutorId(executorId);
+        RemotePromise<Void> result = (RemotePromise<Void>) asyncScheduledServiceAtFixed.scheduleWithFixedDelay(params);
         addListener(result);
-        return new RedissonScheduledFuture<Void>(result, startTime);
+        return createFuture(result, startTime);
     }
 
     @Override
-    public boolean cancelScheduledTask(String taskId) {
-        return scheduledRemoteService.cancelExecution(taskId);
+    public boolean cancelTask(String taskId) {
+        return commandExecutor.get(cancelTaskAsync(taskId));
     }
 
-    private <T> T doInvokeAny(Collection<? extends Callable<T>> tasks,
-                            boolean timed, long millis) throws InterruptedException, ExecutionException, TimeoutException {
-        if (tasks == null) {
-            throw new NullPointerException();
+    @Override
+    public RFuture<Boolean> cancelTaskAsync(String taskId) {
+        if (taskId.startsWith("01")) {
+            return scheduledRemoteService.cancelExecutionAsync(new RequestId(taskId));
         }
-
-        int ntasks = tasks.size();
-        if (ntasks == 0) {
-            throw new IllegalArgumentException();
-        }
-
-        List<Future<T>> futures = new ArrayList<Future<T>>(ntasks);
-
-        try {
-            ExecutionException ee = null;
-            long lastTime = timed ? System.currentTimeMillis() : 0;
-            Iterator<? extends Callable<T>> it = tasks.iterator();
-
-            // Start one task for sure; the rest incrementally
-            futures.add(submit(it.next()));
-            --ntasks;
-            int active = 1;
-
-            for (;;) {
-                Future<T> f = poll(futures);
-                if (f == null) {
-                    if (ntasks > 0) {
-                        --ntasks;
-                        futures.add(submit(it.next()));
-                        ++active;
-                    }
-                    else if (active == 0)
-                        break;
-                    else if (timed) {
-                        f = poll(futures, millis, TimeUnit.MILLISECONDS);
-                        if (f == null)
-                            throw new TimeoutException();
-                        long now = System.currentTimeMillis();
-                        millis -= now - lastTime;
-                        lastTime = now;
-                    }
-                    else
-                        f = poll(futures, -1, null);
-                }
-                if (f != null) {
-                    --active;
-                    try {
-                        return f.get();
-                    } catch (ExecutionException eex) {
-                        ee = eex;
-                    } catch (RuntimeException rex) {
-                        ee = new ExecutionException(rex);
-                    }
-                }
-            }
-
-            if (ee == null)
-                ee = new ExecutionException("No tasks were finised", null);
-            throw ee;
-
-        } finally {
-            for (Future<T> f : futures)
-                f.cancel(true);
-        }
+        return executorRemoteService.cancelExecutionAsync(new RequestId(taskId));
     }
-    
-    private <T> Future<T> poll(List<Future<T>> futures, long timeout, TimeUnit timeUnit) throws InterruptedException {
-        final CountDownLatch latch = new CountDownLatch(1);
-        final AtomicReference<Future<T>> result = new AtomicReference<Future<T>>();
-        FutureListener<T> listener = new FutureListener<T>() {
-            @Override
-            public void operationComplete(io.netty.util.concurrent.Future<T> future) throws Exception {
-                latch.countDown();
-                result.compareAndSet(null, future);
-            }
-        };
-        for (Future<T> future : futures) {
+
+    private <T> RFuture<T> poll(List<RExecutorFuture<?>> futures, long timeout, TimeUnit timeUnit) throws InterruptedException {
+        CountDownLatch latch = new CountDownLatch(1);
+        AtomicReference<RFuture<T>> result = new AtomicReference<>();
+        for (Future<?> future : futures) {
             RFuture<T> f = (RFuture<T>) future;
-            f.addListener(listener);
+            f.onComplete((r, e) -> {
+                latch.countDown();
+                result.compareAndSet(null, f);
+            });
         }
         
         if (timeout == -1) {
@@ -612,29 +1022,14 @@ public class RedissonExecutorService implements RScheduledExecutorService {
         } else {
             latch.await(timeout, timeUnit);
         }
-        
-        for (Future<T> future : futures) {
-            RFuture<T> f = (RFuture<T>) future;
-            f.removeListener(listener);
-        }
 
         return result.get();
     }
     
-    private <T> Future<T> poll(List<Future<T>> futures) {
-        for (Future<T> future : futures) {
-            if (future.isDone()) {
-                return future;
-            }
-        }
-        return null;
-    }
-
     @Override
-    public <T> T invokeAny(Collection<? extends Callable<T>> tasks)
-        throws InterruptedException, ExecutionException {
+    public <T> T invokeAny(Collection<? extends Callable<T>> tasks) throws InterruptedException, ExecutionException {
         try {
-            return doInvokeAny(tasks, false, 0);
+            return invokeAny(tasks, -1, null);
         } catch (TimeoutException cannotHappen) {
             return null;
         }
@@ -642,9 +1037,25 @@ public class RedissonExecutorService implements RScheduledExecutorService {
 
     @Override
     public <T> T invokeAny(Collection<? extends Callable<T>> tasks,
-                           long timeout, TimeUnit unit)
-        throws InterruptedException, ExecutionException, TimeoutException {
-        return doInvokeAny(tasks, true, unit.toMillis(timeout));
+                           long timeout, TimeUnit unit) throws InterruptedException, ExecutionException, TimeoutException {
+        if (tasks == null) {
+            throw new NullPointerException();
+        }
+
+        List<RExecutorFuture<?>> futures = new ArrayList<>();
+        for (Callable<T> callable : tasks) {
+            RExecutorFuture<T> future = submit(callable);
+            futures.add(future);
+        }
+
+        RFuture<T> result = poll(futures, timeout, unit);
+        if (result == null) {
+            throw new TimeoutException();
+        }
+        for (RExecutorFuture<?> f : futures) {
+            f.cancel(true);
+        }
+        return result.getNow();
     }
 
     @Override
@@ -653,29 +1064,10 @@ public class RedissonExecutorService implements RScheduledExecutorService {
             throw new NullPointerException();
         }
         
-        List<Future<T>> futures = new ArrayList<Future<T>>(tasks.size());
-        boolean done = false;
-        try {
-            for (Callable<T> t : tasks) {
-                Future<T> future = submit(t);
-                futures.add(future);
-            }
-            for (Future<T> f : futures) {
-                if (!f.isDone()) {
-                    try {
-                        f.get();
-                    } catch (CancellationException ignore) {
-                    } catch (ExecutionException ignore) {
-                    }
-                }
-            }
-            done = true;
-            return futures;
-        } finally {
-            if (!done)
-                for (Future<T> f : futures)
-                    f.cancel(true);
-        }
+        RExecutorBatchFuture future = submit(tasks.toArray(new Callable[tasks.size()]));
+        future.await();
+        List<?> futures = future.getTaskFutures();
+        return (List<Future<T>>) futures;
     }
 
     @Override
@@ -685,55 +1077,10 @@ public class RedissonExecutorService implements RScheduledExecutorService {
             throw new NullPointerException();
         }
         
-        long millis = unit.toMillis(timeout);
-        List<Future<T>> futures = new ArrayList<Future<T>>(tasks.size());
-        boolean done = false;
-        
-        try {
-            long lastTime = System.currentTimeMillis();
-
-            for (Callable<T> task : tasks) {
-                Future<T> future = submit(task);
-                futures.add(future);
-                
-                long now = System.currentTimeMillis();
-                millis -= now - lastTime;
-                lastTime = now;
-                if (millis <= 0) {
-                    int remainFutures = tasks.size() - futures.size();
-                    for (int i = 0; i < remainFutures; i++) {
-                        RPromise<T> cancelledFuture = connectionManager.newPromise();
-                        cancelledFuture.cancel(true);
-                        futures.add(cancelledFuture);
-                        
-                    }
-                    return futures;
-                }
-            }
-
-            for (Future<T> f : futures) {
-                if (!f.isDone()) {
-                    if (millis <= 0)
-                        return futures;
-                    try {
-                        f.get(millis, TimeUnit.MILLISECONDS);
-                    } catch (CancellationException ignore) {
-                    } catch (ExecutionException ignore) {
-                    } catch (TimeoutException toe) {
-                        return futures;
-                    }
-                    long now = System.currentTimeMillis();
-                    millis -= now - lastTime;
-                    lastTime = now;
-                }
-            }
-            done = true;
-            return futures;
-        } finally {
-            if (!done)
-                for (Future<T> f : futures)
-                    f.cancel(true);
-        }
+        RExecutorBatchFuture future = submit(tasks.toArray(new Callable[tasks.size()]));
+        future.await(timeout, unit);
+        List<?> futures = future.getTaskFutures();
+        return (List<Future<T>>) futures;
     }
 
 }

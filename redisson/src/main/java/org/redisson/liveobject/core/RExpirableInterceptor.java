@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,9 +34,9 @@ public class RExpirableInterceptor {
     public static Object intercept(
             @Origin Method method,
             @AllArguments Object[] args,
-            @FieldValue("liveObjectLiveMap") RMap map
+            @FieldValue("liveObjectLiveMap") RMap<?, ?> map
     ) throws Exception {
-        Class[] cls = new Class[args.length];
+        Class<?>[] cls = new Class[args.length];
         for (int i = 0; i < args.length; i++) {
             cls[i] = args[i].getClass();
         }

@@ -1,9 +1,11 @@
 package org.redisson.executor;
 
+import java.io.Serializable;
+
 import org.redisson.api.RedissonClient;
 import org.redisson.api.annotation.RInject;
 
-public class ScheduledLongRunnableTask implements Runnable {
+public class ScheduledLongRunnableTask implements Runnable, Serializable {
 
     @RInject
     private RedissonClient redisson;
@@ -19,7 +21,7 @@ public class ScheduledLongRunnableTask implements Runnable {
 
     @Override
     public void run() {
-        for (int i = 0; i < Long.MAX_VALUE; i++) {
+        for (long i = 0; i < Long.MAX_VALUE; i++) {
             if (Thread.currentThread().isInterrupted()) {
                 System.out.println("interrupted " + i);
                 redisson.getBucket(objectName).set(i);
@@ -27,5 +29,5 @@ public class ScheduledLongRunnableTask implements Runnable {
             }
         }
     }
-
+    
 }

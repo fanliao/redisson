@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,21 +15,13 @@
  */
 package org.redisson.connection;
 
-import java.net.InetAddress;
-import java.net.UnknownHostException;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicReference;
+import java.util.UUID;
 
-import org.redisson.client.RedisConnectionException;
 import org.redisson.config.Config;
 import org.redisson.config.MasterSlaveServersConfig;
 import org.redisson.config.ReadMode;
 import org.redisson.config.SingleServerConfig;
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
-
-import io.netty.util.concurrent.GlobalEventExecutor;
-import io.netty.util.concurrent.ScheduledFuture;
+import org.redisson.config.SubscriptionMode;
 
 /**
  * 
@@ -38,29 +30,21 @@ import io.netty.util.concurrent.ScheduledFuture;
  */
 public class SingleConnectionManager extends MasterSlaveConnectionManager {
 
-    private final Logger log = LoggerFactory.getLogger(getClass());
-
-    private final AtomicReference<InetAddress> currentMaster = new AtomicReference<InetAddress>();
-
-    private ScheduledFuture<?> monitorFuture;
-
-    public SingleConnectionManager(SingleServerConfig cfg, Config config) {
-        super(create(cfg), config);
-
-        if (cfg.isDnsMonitoring()) {
-            try {
-                this.currentMaster.set(InetAddress.getByName(cfg.getAddress().getHost()));
-            } catch (UnknownHostException e) {
-                throw new RedisConnectionException("Unknown host: " + cfg.getAddress().getHost(), e);
-            }
-            log.debug("DNS monitoring enabled; Current master set to {}", currentMaster.get());
-            monitorDnsChange(cfg);
-        }
+    public SingleConnectionManager(SingleServerConfig cfg, Config config, UUID id) {
+        super(create(cfg), config, id);
     }
 
     private static MasterSlaveServersConfig create(SingleServerConfig cfg) {
         MasterSlaveServersConfig newconfig = new MasterSlaveServersConfig();
-        String addr = cfg.getAddress().getHost() + ":" + cfg.getAddress().getPort();
+        
+        newconfig.setPingConnectionInterval(cfg.getPingConnectionInterval());
+        newconfig.setSslEnableEndpointIdentification(cfg.isSslEnableEndpointIdentification());
+        newconfig.setSslProvider(cfg.getSslProvider());
+        newconfig.setSslTruststore(cfg.getSslTruststore());
+        newconfig.setSslTruststorePassword(cfg.getSslTruststorePassword());
+        newconfig.setSslKeystore(cfg.getSslKeystore());
+        newconfig.setSslKeystorePassword(cfg.getSslKeystorePassword());
+        
         newconfig.setRetryAttempts(cfg.getRetryAttempts());
         newconfig.setRetryInterval(cfg.getRetryInterval());
         newconfig.setTimeout(cfg.getTimeout());
@@ -68,50 +52,21 @@ public class SingleConnectionManager extends MasterSlaveConnectionManager {
         newconfig.setPassword(cfg.getPassword());
         newconfig.setDatabase(cfg.getDatabase());
         newconfig.setClientName(cfg.getClientName());
-        newconfig.setMasterAddress(addr);
+        newconfig.setMasterAddress(cfg.getAddress());
         newconfig.setMasterConnectionPoolSize(cfg.getConnectionPoolSize());
         newconfig.setSubscriptionsPerConnection(cfg.getSubscriptionsPerConnection());
-        newconfig.setSlaveSubscriptionConnectionPoolSize(cfg.getSubscriptionConnectionPoolSize());
+        newconfig.setSubscriptionConnectionPoolSize(cfg.getSubscriptionConnectionPoolSize());
         newconfig.setConnectTimeout(cfg.getConnectTimeout());
         newconfig.setIdleConnectionTimeout(cfg.getIdleConnectionTimeout());
-        newconfig.setFailedAttempts(cfg.getFailedAttempts());
-        newconfig.setReconnectionTimeout(cfg.getReconnectionTimeout());
+        newconfig.setDnsMonitoringInterval(cfg.getDnsMonitoringInterval());
 
         newconfig.setMasterConnectionMinimumIdleSize(cfg.getConnectionMinimumIdleSize());
-        newconfig.setSlaveSubscriptionConnectionMinimumIdleSize(cfg.getSubscriptionConnectionMinimumIdleSize());
+        newconfig.setSubscriptionConnectionMinimumIdleSize(cfg.getSubscriptionConnectionMinimumIdleSize());
         newconfig.setReadMode(ReadMode.MASTER);
+        newconfig.setSubscriptionMode(SubscriptionMode.MASTER);
+        newconfig.setKeepAlive(cfg.isKeepAlive());
+        
         return newconfig;
     }
 
-    private void monitorDnsChange(final SingleServerConfig cfg) {
-        monitorFuture = GlobalEventExecutor.INSTANCE.scheduleWithFixedDelay(new Runnable() {
-            @Override
-            public void run() {
-                try {
-                    InetAddress master = currentMaster.get();
-                    InetAddress now = InetAddress.getByName(cfg.getAddress().getHost());
-                    if (!now.getHostAddress().equals(master.getHostAddress())) {
-                        log.info("Detected DNS change. {} has changed from {} to {}", cfg.getAddress().getHost(), master.getHostAddress(), now.getHostAddress());
-                        if (currentMaster.compareAndSet(master, now)) {
-                            changeMaster(singleSlotRange.getStartSlot(), cfg.getAddress().getHost(), cfg.getAddress().getPort());
-                            log.info("Master has been changed");
-                        }
-                    }
-
-                } catch (Exception e) {
-                    log.error(e.getMessage(), e);
-                }
-
-            }
-
-        }, cfg.getDnsMonitoringInterval(), cfg.getDnsMonitoringInterval(), TimeUnit.MILLISECONDS);
-    }
-
-    @Override
-    public void shutdown() {
-        if (monitorFuture != null) {
-            monitorFuture.cancel(true);
-        }
-        super.shutdown();
-    }
 }

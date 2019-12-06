@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,6 +29,54 @@ import java.util.Set;
  */
 public interface RMultimap<K, V> extends RExpirable, RMultimapAsync<K, V> {
 
+    /**
+     * Returns <code>RCountDownLatch</code> instance associated with key
+     * 
+     * @param key - map key
+     * @return countdownlatch
+     */
+    RCountDownLatch getCountDownLatch(K key);
+    
+    /**
+     * Returns <code>RPermitExpirableSemaphore</code> instance associated with key
+     * 
+     * @param key - map key
+     * @return permitExpirableSemaphore
+     */
+    RPermitExpirableSemaphore getPermitExpirableSemaphore(K key);
+
+    /**
+     * Returns <code>RSemaphore</code> instance associated with key
+     * 
+     * @param key - map key
+     * @return semaphore
+     */
+    RSemaphore getSemaphore(K key);
+    
+    /**
+     * Returns <code>RLock</code> instance associated with key
+     * 
+     * @param key - map key
+     * @return fairlock
+     */
+    RLock getFairLock(K key);
+
+    /**
+     * Returns <code>RReadWriteLock</code> instance associated with key
+     * 
+     * @param key - map key
+     * @return readWriteLock
+     */
+    RReadWriteLock getReadWriteLock(K key);
+    
+    /**
+     * Returns <code>RLock</code> instance associated with key
+     * 
+     * @param key - map key
+     * @return lock
+     */
+    RLock getLock(K key);
+    
     /**
      * Returns the number of key-value pairs in this multimap.
      *
@@ -226,7 +274,13 @@ public interface RMultimap<K, V> extends RExpirable, RMultimapAsync<K, V> {
      * @param keys - map keys
      * @return the number of keys that were removed from the hash, not including specified but non existing keys
      */
-    long fastRemove(K ... keys);
+    long fastRemove(K... keys);
 
+    /**
+     * Read all keys at once
+     *
+     * @return keys
+     */
+    Set<K> readAllKeySet();
 
 }

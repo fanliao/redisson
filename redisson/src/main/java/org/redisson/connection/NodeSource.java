@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,38 +15,48 @@
  */
 package org.redisson.connection;
 
-import java.net.InetSocketAddress;
+import org.redisson.client.RedisClient;
+import org.redisson.misc.RedisURI;
 
+/**
+ * 
+ * @author Nikita Koksharov
+ *
+ */
 public class NodeSource {
-
-    public static final NodeSource ZERO = new NodeSource(0);
 
     public enum Redirect {MOVED, ASK}
 
-    private final Integer slot;
-    private final InetSocketAddress addr;
-    private final Redirect redirect;
+    private Integer slot;
+    private RedisURI addr;
+    private RedisClient redisClient;
+    private Redirect redirect;
     private MasterSlaveEntry entry;
 
     public NodeSource(MasterSlaveEntry entry) {
-        this(null, null, null);
         this.entry = entry;
     }
 
-    public NodeSource(MasterSlaveEntry entry, InetSocketAddress addr) {
-        this(null, addr, null);
+    public NodeSource(MasterSlaveEntry entry, Integer slot) {
         this.entry = entry;
+        this.slot = slot;
+    }
+
+    public NodeSource(MasterSlaveEntry entry, RedisClient redisClient) {
+        this.entry = entry;
+        this.redisClient = redisClient;
     }
     
-    public NodeSource(Integer slot) {
-        this(slot, null, null);
+    public NodeSource(RedisClient redisClient) {
+        this.redisClient = redisClient;
     }
-
-    public NodeSource(Integer slot, InetSocketAddress addr) {
-        this(slot, addr, null);
+    
+    public NodeSource(Integer slot, RedisClient redisClient) {
+        this.slot = slot;
+        this.redisClient = redisClient;
     }
-
-    public NodeSource(Integer slot, InetSocketAddress addr, Redirect redirect) {
+    
+    public NodeSource(Integer slot, RedisURI addr, Redirect redirect) {
         this.slot = slot;
         this.addr = addr;
         this.redirect = redirect;
@@ -64,13 +74,20 @@ public class NodeSource {
         return slot;
     }
 
-    public InetSocketAddress getAddr() {
+    public RedisClient getRedisClient() {
+        return redisClient;
+    }
+    
+    public RedisURI getAddr() {
         return addr;
     }
 
     @Override
     public String toString() {
-        return "NodeSource [slot=" + slot + ", addr=" + addr + ", redirect=" + redirect + "]";
+        return "NodeSource [slot=" + slot + ", addr=" + addr + ", redisClient=" + redisClient + ", redirect=" + redirect
+                + ", entry=" + entry + "]";
     }
+
+    
 
 }

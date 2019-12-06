@@ -9,15 +9,17 @@ import org.junit.Assert;
 import org.junit.Test;
 import org.redisson.api.RScript;
 import org.redisson.api.RScriptReactive;
+import org.redisson.api.RScriptRx;
 import org.redisson.client.RedisException;
+import org.redisson.client.codec.StringCodec;
 
 public class RedissonScriptReactiveTest extends BaseReactiveTest {
 
     @Test
     public void testEval() {
-        RScriptReactive script = redisson.getScript();
-        List<Object> res = sync(script.<List<Object>>eval(RScript.Mode.READ_ONLY, "return {1,2,3.3333,'\"foo\"',nil,'bar'}", RScript.ReturnType.MULTI, Collections.emptyList()));
-        assertThat(res).containsExactly(1L, 2L, 3L, "foo");
+        RScriptReactive script = redisson.getScript(StringCodec.INSTANCE);
+        List<Object> res = sync(script.eval(RScript.Mode.READ_ONLY, "return {'1','2','3.3333','foo',nil,'bar'}", RScript.ReturnType.MULTI, Collections.emptyList()));
+        assertThat(res).containsExactly("1", "2", "3.3333", "foo");
     }
 
     @Test
@@ -30,7 +32,7 @@ public class RedissonScriptReactiveTest extends BaseReactiveTest {
         Assert.assertEquals(1, r1.size());
         Assert.assertTrue(r1.get(0));
 
-        s.scriptFlush();
+        sync(s.scriptFlush());
 
         List<Boolean> r2 = sync(s.scriptExists(r));
         Assert.assertEquals(1, r2.size());
@@ -39,7 +41,7 @@ public class RedissonScriptReactiveTest extends BaseReactiveTest {
 
     @Test
     public void testScriptFlush() {
-        redisson.getBucket("foo").set("bar");
+        sync(redisson.getBucket("foo").set("bar"));
         String r = sync(redisson.getScript().scriptLoad("return redis.call('get', 'foo')"));
         Assert.assertEquals("282297a0228f48cd3fc6a55de6316f31422f5d17", r);
         String r1 = sync(redisson.getScript().<String>evalSha(RScript.Mode.READ_ONLY, "282297a0228f48cd3fc6a55de6316f31422f5d17", RScript.ReturnType.VALUE, Collections.emptyList()));

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,12 +16,8 @@
 package org.redisson;
 
 import java.util.List;
-import java.util.Queue;
-import java.util.concurrent.atomic.AtomicReference;
 
 import org.redisson.api.RLock;
-
-import io.netty.util.concurrent.Future;
 
 /**
  * RedLock locking algorithm implementation for multiple locks. 
@@ -54,18 +50,13 @@ public class RedissonRedLock extends RedissonMultiLock {
     }
 
     @Override
+    protected long calcLockWaitTime(long remainTime) {
+        return Math.max(remainTime / locks.size(), 1);
+    }
+    
+    @Override
     public void unlock() {
         unlockInner(locks);
     }
 
-    @Override
-    protected boolean isLockFailed(Future<Boolean> future) {
-        return false;
-    }
-    
-    @Override
-    protected boolean isAllLocksAcquired(AtomicReference<RLock> lockedLockHolder, AtomicReference<Throwable> failed, Queue<RLock> lockedLocks) {
-        return (lockedLockHolder.get() == null && failed.get() == null) || lockedLocks.size() >= minLocksAmount(locks);
-    }
-    
 }

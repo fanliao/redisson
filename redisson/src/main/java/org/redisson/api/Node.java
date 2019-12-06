@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,6 +16,10 @@
 package org.redisson.api;
 
 import java.net.InetSocketAddress;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
+
+import org.redisson.client.protocol.Time;
 
 /**
  * Redis node interface
@@ -23,14 +27,18 @@ import java.net.InetSocketAddress;
  * @author Nikita Koksharov
  *
  */
-public interface Node {
+public interface Node extends NodeAsync {
 
+    enum InfoSection {ALL, DEFAULT, SERVER, CLIENTS, MEMORY, PERSISTENCE, STATS, REPLICATION, CPU, COMMANDSTATS, CLUSTER, KEYSPACE}
+    
+    Map<String, String> info(InfoSection section);
+    
     /**
      * Returns current Redis server time in seconds
      * 
      * @return time in seconds
      */
-    long time();
+    Time time();
     
     /**
      * Returns node type
@@ -47,10 +55,20 @@ public interface Node {
     InetSocketAddress getAddr();
 
     /**
-     * Ping Redis node by PING command.
+     * Ping Redis node.
+     * Default timeout is 1000 milliseconds
      *
-     * @return <code>true</code> if PONG received, <code>false</code> otherwise
+     * @return <code>true</code> if "PONG" reply received, <code>false</code> otherwise
      */
     boolean ping();
 
+    /**
+     * Ping Redis node with specified timeout.
+     *
+     * @param timeout - ping timeout
+     * @param timeUnit - timeout unit
+     * @return <code>true</code> if "PONG" reply received, <code>false</code> otherwise
+     */
+    boolean ping(long timeout, TimeUnit timeUnit);
+    
 }

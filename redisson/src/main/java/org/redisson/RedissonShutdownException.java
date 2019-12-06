@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,9 @@
  */
 package org.redisson;
 
-public class RedissonShutdownException extends RuntimeException {
+import org.redisson.client.RedisException;
+
+public class RedissonShutdownException extends RedisException {
 
     private static final long serialVersionUID = -2694051226420789395L;
 

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -26,6 +26,11 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 
+/**
+ * 
+ * @author Nikita Koksharov
+ *
+ */
 public class CacheConfigSupport {
 
     ObjectMapper jsonMapper = new ObjectMapper();
@@ -51,7 +56,7 @@ public class CacheConfigSupport {
         return jsonMapper.readValue(inputStream, new TypeReference<Map<String, CacheConfig>>() {});
     }
 
-    public String toJSON(Map<String, CacheConfig> configs) throws IOException {
+    public String toJSON(Map<String, ? extends CacheConfig> configs) throws IOException {
         return jsonMapper.writeValueAsString(configs);
     }
 
@@ -75,7 +80,7 @@ public class CacheConfigSupport {
         return yamlMapper.readValue(inputStream, new TypeReference<Map<String, CacheConfig>>() {});
     }
 
-    public String toYAML(Map<String, CacheConfig> configs) throws IOException {
+    public String toYAML(Map<String, ? extends CacheConfig> configs) throws IOException {
         return yamlMapper.writeValueAsString(configs);
     }
 

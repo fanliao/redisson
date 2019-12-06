@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,7 +23,6 @@ import java.util.List;
 import org.redisson.api.RFuture;
 import org.redisson.client.protocol.RedisCommands;
 import org.redisson.command.CommandExecutor;
-import org.redisson.pubsub.SemaphorePubSub;
 
 /**
  * 
@@ -36,9 +35,8 @@ public class RedissonQueueSemaphore extends RedissonSemaphore {
     private Object value;
     private Collection<?> values;
     
-    public RedissonQueueSemaphore(CommandExecutor commandExecutor, String name, 
-            SemaphorePubSub semaphorePubSub) {
-        super(commandExecutor, name, semaphorePubSub);
+    public RedissonQueueSemaphore(CommandExecutor commandExecutor, String name) {
+        super(commandExecutor, name);
     }
     
     public void setQueueName(String queueName) {
@@ -58,13 +56,15 @@ public class RedissonQueueSemaphore extends RedissonSemaphore {
         if (values != null) {
             params = new ArrayList<Object>(values.size() + 1);
             params.add(values.size());
-            params.addAll(values);
+            for (Object value : values) {
+                params.add(encode(value));
+            }
         } else {
             params = new ArrayList<Object>(2);
             params.add(1);
-            params.add(value);
+            params.add(encode(value));
         }
-        return commandExecutor.evalWriteAsync(getName(), codec, RedisCommands.EVAL_BOOLEAN_WITH_VALUES_6,
+        return commandExecutor.evalWriteAsync(getName(), codec, RedisCommands.EVAL_BOOLEAN,
                 "local value = redis.call('get', KEYS[1]); " +
                     "assert(value ~= false, 'Capacity of queue ' .. KEYS[1] .. ' has not been set'); " +
                     "if (tonumber(value) >= tonumber(ARGV[1])) then " +

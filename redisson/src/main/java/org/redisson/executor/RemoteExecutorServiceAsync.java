@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,11 @@ package org.redisson.executor;
 
 import org.redisson.api.RFuture;
 import org.redisson.api.annotation.RRemoteAsync;
+import org.redisson.executor.params.ScheduledAtFixedRateParameters;
+import org.redisson.executor.params.ScheduledCronExpressionParameters;
+import org.redisson.executor.params.ScheduledParameters;
+import org.redisson.executor.params.ScheduledWithFixedDelayParameters;
+import org.redisson.executor.params.TaskParameters;
 
 /**
  * 
@@ -26,18 +31,18 @@ import org.redisson.api.annotation.RRemoteAsync;
 @RRemoteAsync(RemoteExecutorService.class)
 public interface RemoteExecutorServiceAsync {
 
-    <T> RFuture<T> executeCallable(String className, byte[] classBody, byte[] state);
+    <T> RFuture<T> executeCallable(TaskParameters params);
     
-    RFuture<Void> executeRunnable(String className, byte[] classBody, byte[] state);
+    RFuture<Void> executeRunnable(TaskParameters params);
     
-    <T> RFuture<T> scheduleCallable(String className, byte[] classBody, byte[] state, long startTime);
+    <T> RFuture<T> scheduleCallable(ScheduledParameters params);
     
-    RFuture<Void> scheduleRunnable(String className, byte[] classBody, byte[] state, long startTime);
+    RFuture<Void> scheduleRunnable(ScheduledParameters params);
     
-    RFuture<Void> scheduleAtFixedRate(String className, byte[] classBody, byte[] state, long startTime, long period);
+    RFuture<Void> scheduleAtFixedRate(ScheduledAtFixedRateParameters params);
     
-    RFuture<Void> scheduleWithFixedDelay(String className, byte[] classBody, byte[] state, long startTime, long delay);
-    
-    RFuture<Void> schedule(String className, byte[] classBody, byte[] state, long startTime, String cronExpression);
+    RFuture<Void> scheduleWithFixedDelay(ScheduledWithFixedDelayParameters params);
+
+    RFuture<Void> schedule(ScheduledCronExpressionParameters params);
     
 }

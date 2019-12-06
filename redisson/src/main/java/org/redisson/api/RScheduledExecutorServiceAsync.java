@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,10 +18,8 @@ package org.redisson.api;
 import java.util.concurrent.Callable;
 import java.util.concurrent.TimeUnit;
 
-import org.redisson.CronSchedule;
-
 /**
- * Distributed implementation of {@link java.util.concurrent.ScheduledExecutorService}
+ * Redis based implementation of {@link java.util.concurrent.ScheduledExecutorService}
  * 
  * @author Nikita Koksharov
  *

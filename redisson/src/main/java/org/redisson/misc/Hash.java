@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,37 +19,75 @@ import io.netty.buffer.ByteBuf;
 import io.netty.buffer.Unpooled;
 import io.netty.handler.codec.base64.Base64;
 import io.netty.util.CharsetUtil;
-import net.openhft.hashing.LongHashFunction;
 
-public class Hash {
+/**
+ * 
+ * @author Nikita Koksharov
+ *
+ */
+public final class Hash {
+
+    private static final long[] KEY = {0x9e3779b97f4a7c15L, 0xf39cc0605cedc834L, 0x1082276bf3a27251L, 0xf86c6a11d0c18e95L};
 
     private Hash() {
     }
+    
+    public static byte[] hash128toArray(ByteBuf objectState) {
+        long[] hash = hash128(objectState);
 
-    public static byte[] hash(byte[] objectState) {
-        long h1 = LongHashFunction.farmUo().hashBytes(objectState);
-        long h2 = LongHashFunction.xx_r39().hashBytes(objectState);
-
-        ByteBuf buf = Unpooled.buffer((2 * Long.SIZE) / Byte.SIZE).writeLong(h1).writeLong(h2);
+        ByteBuf buf = Unpooled.copyLong(hash[0], hash[1]);
         try {
-            return buf.array();
+            byte[] dst = new byte[buf.readableBytes()];
+            buf.readBytes(dst);
+            return dst;
         } finally {
             buf.release();
         }
     }
-
     
-    public static String hashToBase64(byte[] objectState) {
-        long h1 = LongHashFunction.farmUo().hashBytes(objectState);
-        long h2 = LongHashFunction.xx_r39().hashBytes(objectState);
+    public static long hash64(ByteBuf objectState) {
+        HighwayHash h = calcHash(objectState);
+        return h.finalize64();
+    }
+    
+    public static long[] hash128(ByteBuf objectState) {
+        HighwayHash h = calcHash(objectState);
+        return h.finalize128();
+    }
 
-        ByteBuf buf = Unpooled.buffer((2 * Long.SIZE) / Byte.SIZE).writeLong(h1).writeLong(h2);
+    protected static HighwayHash calcHash(ByteBuf objectState) {
+        HighwayHash h = new HighwayHash(KEY);
+        int i;
+        int length = objectState.readableBytes();
+        int offset = objectState.readerIndex();
+        byte[] data = new byte[32];
+        for (i = 0; i + 32 <= length; i += 32) {
+            objectState.getBytes(offset  + i, data);
+            h.updatePacket(data, 0);
+        }
+        if ((length & 31) != 0) {
+            data = new byte[length & 31];
+            objectState.getBytes(offset  + i, data);
+            h.updateRemainder(data, 0, length & 31);
+        }
+        return h;
+    }
 
-        ByteBuf b = Base64.encode(buf);
-        String s = b.toString(CharsetUtil.UTF_8);
-        b.release();
-        buf.release();
-        return s.substring(0, s.length() - 2);
+    public static String hash128toBase64(ByteBuf objectState) {
+        long[] hash = hash128(objectState);
+
+        ByteBuf buf = Unpooled.copyLong(hash[0], hash[1]);
+        try {
+            ByteBuf b = Base64.encode(buf);
+            try {
+                String s = b.toString(CharsetUtil.UTF_8);
+                return s.substring(0, s.length() - 2);
+            } finally {
+                b.release();
+            }
+        } finally {
+            buf.release();
+        }
     }
     
 }

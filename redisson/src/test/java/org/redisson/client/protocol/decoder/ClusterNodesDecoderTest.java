@@ -14,7 +14,7 @@ public class ClusterNodesDecoderTest {
 
     @Test
     public void test() throws IOException {
-        ClusterNodesDecoder decoder = new ClusterNodesDecoder();
+        ClusterNodesDecoder decoder = new ClusterNodesDecoder(false);
         ByteBuf buf = Unpooled.buffer();
         
         String info = "7af253f8c20a3b3fbd481801bd361ec6643c6f0b 192.168.234.129:7001@17001 master - 0 1478865073260 8 connected 5461-10922\n" +
@@ -28,6 +28,7 @@ public class ClusterNodesDecoderTest {
         buf.writeBytes(src);
         List<ClusterNodeInfo> nodes = decoder.decode(buf, null);
         ClusterNodeInfo node = nodes.get(0);
+        Assert.assertEquals("192.168.234.129", node.getAddress().getHost());
         Assert.assertEquals(7001, node.getAddress().getPort());
     }
     

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -21,25 +21,26 @@ import javax.cache.processor.MutableEntry;
  * 
  * @author Nikita Koksharov
  *
- * @param <K>
- * @param <V>
+ * @param <K> key
+ * @param <V> value
  */
 public class JMutableEntry<K, V> implements MutableEntry<K, V> {
 
     public enum Action {CREATED, READ, UPDATED, DELETED, LOADED, SKIPPED}
     
-    final JCache<K, V> jCache;
-    final K key;
-    boolean isReadThrough;
+    private final JCache<K, V> jCache;
+    private final K key;
+    private boolean isReadThrough;
 
-    Action action = Action.SKIPPED;
-    V value;
+    private Action action = Action.SKIPPED;
+    private V value;
+    private boolean isValueRead;
     
-    public JMutableEntry(JCache<K, V> jCache, V value, K key, boolean isReadThrough) {
+    public JMutableEntry(JCache<K, V> jCache, K key, V value, boolean isReadThrough) {
         super();
         this.jCache = jCache;
-        this.value = value;
         this.key = key;
+        this.value = value;
         this.isReadThrough = isReadThrough;
     }
 
@@ -48,15 +49,25 @@ public class JMutableEntry<K, V> implements MutableEntry<K, V> {
         return key;
     }
 
+    public V value() {
+        return value;
+    }
+    
     @Override
     public V getValue() {
         if (action != Action.SKIPPED) {
             return value;
         }
+        
+        if (!isValueRead) {
+            value = jCache.getValueLocked(key);
+            isValueRead = true;
+        }
+        
         if (value != null) {
             action = Action.READ;
         } else if (isReadThrough) {
-            value = jCache.load(key);
+            value = jCache.loadValue(key);
             if (value != null) {
                 action = Action.LOADED;
             }
@@ -64,10 +75,10 @@ public class JMutableEntry<K, V> implements MutableEntry<K, V> {
         }
         return value;
     }
-
+    
     @Override
     public <T> T unwrap(Class<T> clazz) {
-        return (T)this;
+        return (T) this;
     }
 
     @Override
@@ -92,7 +103,7 @@ public class JMutableEntry<K, V> implements MutableEntry<K, V> {
         }
         
         if (action != Action.CREATED) {
-            if (exists()) {
+            if (jCache.containsKey(key)) {
                 action = Action.UPDATED;
             } else {
                 action = Action.CREATED;

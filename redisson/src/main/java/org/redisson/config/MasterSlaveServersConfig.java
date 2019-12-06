@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,25 +15,26 @@
  */
 package org.redisson.config;
 
-import java.net.URI;
-import java.util.Collections;
+import java.util.Arrays;
 import java.util.HashSet;
-import java.util.List;
 import java.util.Set;
 
-import org.redisson.misc.URIBuilder;
-
+/**
+ * 
+ * @author Nikita Koksharov
+ *
+ */
 public class MasterSlaveServersConfig extends BaseMasterSlaveServersConfig<MasterSlaveServersConfig> {
 
     /**
      * Redis slave servers addresses
      */
-    private Set<URI> slaveAddresses = new HashSet<URI>();
+    private Set<String> slaveAddresses = new HashSet<String>();
 
     /**
      * Redis master server address
      */
-    private List<URI> masterAddress;
+    private String masterAddress;
 
     /**
      * Database index used for Redis connection
@@ -58,21 +59,11 @@ public class MasterSlaveServersConfig extends BaseMasterSlaveServersConfig<Maste
      * @return config
      */
     public MasterSlaveServersConfig setMasterAddress(String masterAddress) {
-        if (masterAddress != null) {
-            this.masterAddress = Collections.singletonList(URIBuilder.create(masterAddress));
-        }
+        this.masterAddress = masterAddress;
         return this;
     }
-    public URI getMasterAddress() {
-        if (masterAddress != null) {
-            return masterAddress.get(0);
-        }
-        return null;
-    }
-    public void setMasterAddress(URI masterAddress) {
-        if (masterAddress != null) {
-            this.masterAddress = Collections.singletonList(masterAddress);
-        }
+    public String getMasterAddress() {
+        return masterAddress;
     }
 
     /**
@@ -81,20 +72,18 @@ public class MasterSlaveServersConfig extends BaseMasterSlaveServersConfig<Maste
      * @param addresses of Redis
      * @return config
      */
-    public MasterSlaveServersConfig addSlaveAddress(String ... addresses) {
-        for (String address : addresses) {
-            slaveAddresses.add(URIBuilder.create(address));
-        }
+    public MasterSlaveServersConfig addSlaveAddress(String... addresses) {
+        slaveAddresses.addAll(Arrays.asList(addresses));
         return this;
     }
-    public MasterSlaveServersConfig addSlaveAddress(URI slaveAddress) {
+    public MasterSlaveServersConfig addSlaveAddress(String slaveAddress) {
         slaveAddresses.add(slaveAddress);
         return this;
     }
-    public Set<URI> getSlaveAddresses() {
+    public Set<String> getSlaveAddresses() {
         return slaveAddresses;
     }
-    public void setSlaveAddresses(Set<URI> readAddresses) {
+    public void setSlaveAddresses(Set<String> readAddresses) {
         this.slaveAddresses = readAddresses;
     }
 

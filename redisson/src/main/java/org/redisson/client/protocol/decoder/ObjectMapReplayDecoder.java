@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,15 +20,14 @@ import java.util.List;
 import java.util.Map;
 
 import org.redisson.client.handler.State;
+import org.redisson.client.protocol.Decoder;
 
-import io.netty.buffer.ByteBuf;
-
+/**
+ * 
+ * @author Nikita Koksharov
+ *
+ */
 public class ObjectMapReplayDecoder implements MultiDecoder<Map<Object, Object>> {
-
-    @Override
-    public Object decode(ByteBuf buf, State state) {
-        throw new UnsupportedOperationException();
-    }
 
     @Override
     public Map<Object, Object> decode(List<Object> parts, State state) {
@@ -36,14 +35,14 @@ public class ObjectMapReplayDecoder implements MultiDecoder<Map<Object, Object>>
         for (int i = 0; i < parts.size(); i++) {
             if (i % 2 != 0) {
                 result.put(parts.get(i-1), parts.get(i));
-           }
+            }
         }
         return result;
     }
 
     @Override
-    public boolean isApplicable(int paramNum, State state) {
-        return false;
+    public Decoder<Object> getDecoder(int paramNum, State state) {
+        return null;
     }
 
 }

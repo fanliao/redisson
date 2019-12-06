@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,15 +15,18 @@
  */
 package org.redisson.client.protocol.pubsub;
 
-import java.io.IOException;
 import java.util.List;
 
+import org.redisson.client.ChannelName;
 import org.redisson.client.handler.State;
 import org.redisson.client.protocol.Decoder;
 import org.redisson.client.protocol.decoder.MultiDecoder;
 
-import io.netty.buffer.ByteBuf;
-
+/**
+ * 
+ * @author Nikita Koksharov
+ *
+ */
 public class PubSubPatternMessageDecoder implements MultiDecoder<Object> {
 
     private final Decoder<Object> decoder;
@@ -34,18 +37,15 @@ public class PubSubPatternMessageDecoder implements MultiDecoder<Object> {
     }
 
     @Override
-    public Object decode(ByteBuf buf, State state) throws IOException {
-        return decoder.decode(buf, null);
+    public Decoder<Object> getDecoder(int paramNum, State state) {
+        return decoder;
     }
-
+    
     @Override
     public PubSubPatternMessage decode(List<Object> parts, State state) {
-        return new PubSubPatternMessage(parts.get(1).toString(), parts.get(2).toString(), parts.get(3));
-    }
-
-    @Override
-    public boolean isApplicable(int paramNum, State state) {
-        return true;
+        ChannelName patternName = new ChannelName((byte[]) parts.get(1));
+        ChannelName name = new ChannelName((byte[]) parts.get(2));
+        return new PubSubPatternMessage(patternName, name, parts.get(3));
     }
 
 }

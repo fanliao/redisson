@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -27,4 +27,23 @@ public class RemoteServiceAck implements RRemoteServiceResponse, Serializable {
 
     private static final long serialVersionUID = -6332680404562746984L;
 
+    private String id;
+
+    public RemoteServiceAck() {
+    }
+
+    public RemoteServiceAck(String id) {
+        this.id = id;
+    }
+    
+    @Override
+    public String getId() {
+        return id;
+    }
+
+    @Override
+    public String toString() {
+        return "RemoteServiceAck [id=" + id + "]";
+    }
+    
 }

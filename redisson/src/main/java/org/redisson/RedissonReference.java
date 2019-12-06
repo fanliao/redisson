@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,51 +15,70 @@
  */
 package org.redisson;
 
-import org.redisson.client.codec.Codec;
+import java.io.Serializable;
+
+import org.redisson.api.RAtomicLong;
+import org.redisson.api.RAtomicLongReactive;
+import org.redisson.api.RBitSet;
+import org.redisson.api.RBitSetReactive;
+import org.redisson.api.RBlockingQueue;
+import org.redisson.api.RBlockingQueueReactive;
+import org.redisson.api.RBucket;
+import org.redisson.api.RBucketReactive;
+import org.redisson.api.RDeque;
+import org.redisson.api.RDequeReactive;
+import org.redisson.api.RHyperLogLog;
+import org.redisson.api.RHyperLogLogReactive;
+import org.redisson.api.RLexSortedSet;
+import org.redisson.api.RLexSortedSetReactive;
+import org.redisson.api.RList;
+import org.redisson.api.RListReactive;
+import org.redisson.api.RMap;
+import org.redisson.api.RMapCache;
+import org.redisson.api.RMapCacheReactive;
+import org.redisson.api.RMapReactive;
 import org.redisson.api.RObject;
 import org.redisson.api.RObjectReactive;
+import org.redisson.api.RQueue;
+import org.redisson.api.RQueueReactive;
+import org.redisson.api.RScoredSortedSet;
+import org.redisson.api.RScoredSortedSetReactive;
+import org.redisson.api.RSet;
+import org.redisson.api.RSetCache;
+import org.redisson.api.RSetCacheReactive;
+import org.redisson.api.RSetReactive;
 import org.redisson.api.annotation.REntity;
+import org.redisson.client.codec.Codec;
+import org.redisson.liveobject.misc.ClassUtils;
 import org.redisson.misc.BiHashMap;
-import org.redisson.reactive.RedissonAtomicLongReactive;
-import org.redisson.reactive.RedissonBitSetReactive;
-import org.redisson.reactive.RedissonBlockingQueueReactive;
-import org.redisson.reactive.RedissonBucketReactive;
-import org.redisson.reactive.RedissonDequeReactive;
-import org.redisson.reactive.RedissonHyperLogLogReactive;
-import org.redisson.reactive.RedissonLexSortedSetReactive;
-import org.redisson.reactive.RedissonListReactive;
-import org.redisson.reactive.RedissonMapCacheReactive;
-import org.redisson.reactive.RedissonMapReactive;
-import org.redisson.reactive.RedissonQueueReactive;
-import org.redisson.reactive.RedissonScoredSortedSetReactive;
-import org.redisson.reactive.RedissonSetCacheReactive;
-import org.redisson.reactive.RedissonSetReactive;
 
 /**
  *
  * @author Rui Gu (https://github.com/jackygurui)
  */
-public class RedissonReference {
+public class RedissonReference implements Serializable {
 
-    private static final BiHashMap<String, String> reactiveMap = new BiHashMap<String, String>();
+    private static final long serialVersionUID = -2378564460151709127L;
+    
+    private static final BiHashMap<String, String> REACTIVE_MAP = new BiHashMap<String, String>();
 
     static {
-        reactiveMap.put(RedissonAtomicLongReactive.class.getName(),         RedissonAtomicLong.class.getName());
-        reactiveMap.put(RedissonBitSetReactive.class.getName(),             RedissonBitSet.class.getName());
-        reactiveMap.put(RedissonBlockingQueueReactive.class.getName(),      RedissonBlockingQueue.class.getName());
-        reactiveMap.put(RedissonBucketReactive.class.getName(),             RedissonBucket.class.getName());
-        reactiveMap.put(RedissonDequeReactive.class.getName(),              RedissonDeque.class.getName());
-        reactiveMap.put(RedissonHyperLogLogReactive.class.getName(),        RedissonHyperLogLog.class.getName());
-        reactiveMap.put(RedissonLexSortedSetReactive.class.getName(),       RedissonLexSortedSet.class.getName());
-        reactiveMap.put(RedissonListReactive.class.getName(),               RedissonList.class.getName());
-        reactiveMap.put(RedissonMapCacheReactive.class.getName(),           RedissonMapCache.class.getName());
-        reactiveMap.put(RedissonMapReactive.class.getName(),                RedissonMap.class.getName());
-        reactiveMap.put(RedissonQueueReactive.class.getName(),              RedissonQueue.class.getName());
-        reactiveMap.put(RedissonScoredSortedSetReactive.class.getName(),    RedissonScoredSortedSet.class.getName());
-        reactiveMap.put(RedissonSetCacheReactive.class.getName(),           RedissonSetCache.class.getName());
-        reactiveMap.put(RedissonSetReactive.class.getName(),                RedissonSet.class.getName());
+        REACTIVE_MAP.put(RAtomicLongReactive.class.getName(),         RAtomicLong.class.getName());
+        REACTIVE_MAP.put(RBitSetReactive.class.getName(),             RBitSet.class.getName());
+        REACTIVE_MAP.put(RBlockingQueueReactive.class.getName(),      RBlockingQueue.class.getName());
+        REACTIVE_MAP.put(RBucketReactive.class.getName(),             RBucket.class.getName());
+        REACTIVE_MAP.put(RDequeReactive.class.getName(),              RDeque.class.getName());
+        REACTIVE_MAP.put(RHyperLogLogReactive.class.getName(),        RHyperLogLog.class.getName());
+        REACTIVE_MAP.put(RLexSortedSetReactive.class.getName(),       RLexSortedSet.class.getName());
+        REACTIVE_MAP.put(RListReactive.class.getName(),               RList.class.getName());
+        REACTIVE_MAP.put(RMapCacheReactive.class.getName(),           RMapCache.class.getName());
+        REACTIVE_MAP.put(RMapReactive.class.getName(),                RMap.class.getName());
+        REACTIVE_MAP.put(RQueueReactive.class.getName(),              RQueue.class.getName());
+        REACTIVE_MAP.put(RScoredSortedSetReactive.class.getName(),    RScoredSortedSet.class.getName());
+        REACTIVE_MAP.put(RSetCacheReactive.class.getName(),           RSetCache.class.getName());
+        REACTIVE_MAP.put(RSetReactive.class.getName(),                RSet.class.getName());
 
-        reactiveMap.makeImmutable();
+        REACTIVE_MAP.makeImmutable();
     }
 
     public static void warmUp() {}
@@ -71,42 +90,40 @@ public class RedissonReference {
     public RedissonReference() {
     }
 
-    public RedissonReference(Class type, String keyName) {
+    public RedissonReference(Class<?> type, String keyName) {
         this(type, keyName, null);
     }
 
-    public RedissonReference(Class type, String keyName, Codec codec) {
-        if (!type.isAnnotationPresent(REntity.class) && !RObject.class.isAssignableFrom(type) && !RObjectReactive.class.isAssignableFrom(type)) {
+    public RedissonReference(Class<?> type, String keyName, Codec codec) {
+        if (!ClassUtils.isAnnotationPresent(type, REntity.class) && !RObject.class.isAssignableFrom(type) && !RObjectReactive.class.isAssignableFrom(type)) {
             throw new IllegalArgumentException("Class reference has to be a type of either RObject or RLiveObject or RObjectReactive");
         }
-        this.type = RObjectReactive.class.isAssignableFrom(type)
-                ? reactiveMap.get(type.getName())
-                : type.getName();
+        if (RObjectReactive.class.isAssignableFrom(type)) {
+            this.type = REACTIVE_MAP.get(type.getName());
+        } else {
+            this.type = type.getName();
+        }
         this.keyName = keyName;
-        this.codec = codec != null ? codec.getClass().getName() : null;
+        if (codec != null) {
+            this.codec = codec.getClass().getName();
+        }
     }
 
     /**
      * @return the type
-     * @throws java.lang.Exception - which could be:
-     *     LinkageError - if the linkage fails
-     *     ExceptionInInitializerError - if the initialization provoked by this method fails
-     *     ClassNotFoundException - if the class cannot be located
+     * @throws java.lang.ClassNotFoundException - if the class cannot be located
      */
-    public Class<?> getType() throws Exception {
+    public Class<?> getType() throws ClassNotFoundException {
         return Class.forName(type);
     }
 
     /**
      * @return the type
-     * @throws java.lang.Exception - which could be:
-     *     LinkageError - if the linkage fails
-     *     ExceptionInInitializerError - if the initialization provoked by this method fails
-     *     ClassNotFoundException - if the class cannot be located
+     * @throws java.lang.ClassNotFoundException - if the class cannot be located
      */
-    public Class<?> getReactiveType() throws Exception {
-        if (reactiveMap.containsValue(type)) {
-            return Class.forName(reactiveMap.reverseGet(type));//live object is not supported in reactive client
+    public Class<?> getReactiveType() throws ClassNotFoundException {
+        if (REACTIVE_MAP.containsValue(type)) {
+            return Class.forName(REACTIVE_MAP.reverseGet(type)); //live object is not supported in reactive client
         }
         throw new ClassNotFoundException("There is no Reactive compatible type for " + type);
     }
@@ -129,7 +146,8 @@ public class RedissonReference {
      * @param type the type to set
      */
     public void setType(Class<?> type) {
-        if (!type.isAnnotationPresent(REntity.class) && (!RObject.class.isAssignableFrom(type) || !RObjectReactive.class.isAssignableFrom(type))) {
+        if (!ClassUtils.isAnnotationPresent(type, REntity.class) 
+                && (!RObject.class.isAssignableFrom(type) || !RObjectReactive.class.isAssignableFrom(type))) {
             throw new IllegalArgumentException("Class reference has to be a type of either RObject or RLiveObject or RObjectReactive");
         }
         this.type = type.getName();
@@ -155,15 +173,13 @@ public class RedissonReference {
 
     /**
      * @return the codec
-     * @throws java.lang.Exception - which could be:
-     *     LinkageError - if the linkage fails
-     *     ExceptionInInitializerError - if the initialization provoked by this method fails
-     *     ClassNotFoundException - if the class cannot be located 
+     * @throws java.lang.ClassNotFoundException - if the class cannot be located
      */
-    public Class<? extends Codec> getCodecType() throws Exception {
-        return (Class<? extends Codec>) (codec == null
-                ? null
-                : Class.forName(codec));
+    public Class<? extends Codec> getCodecType() throws ClassNotFoundException {
+        if (codec != null) {
+            return (Class<? extends Codec>) Class.forName(codec);
+        }
+        return null;
     }
 
     /**

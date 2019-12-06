@@ -84,7 +84,7 @@ public class RedissonDequeTest extends BaseTest {
         queue2.addFirst(5);
         queue2.addFirst(4);
 
-        queue1.pollLastAndOfferFirstTo(queue2);
+        queue1.pollLastAndOfferFirstTo(queue2.getName());
         assertThat(queue2).containsExactly(3, 4, 5, 6);
     }
 
@@ -165,7 +165,7 @@ public class RedissonDequeTest extends BaseTest {
         final Deque<Integer> queue = new ArrayDeque<Integer>();
         queue.addAll(Arrays.asList(1, 2, 3));
 
-        assertThat(queue.descendingIterator()).containsExactly(3, 2, 1);
+        assertThat(queue.descendingIterator()).toIterable().containsExactly(3, 2, 1);
     }
 
     @Test
@@ -173,7 +173,7 @@ public class RedissonDequeTest extends BaseTest {
         final RDeque<Integer> queue = redisson.getDeque("deque");
         queue.addAll(Arrays.asList(1, 2, 3));
 
-        assertThat(queue.descendingIterator()).containsExactly(3, 2, 1);
+        assertThat(queue.descendingIterator()).toIterable().containsExactly(3, 2, 1);
     }
 
 }

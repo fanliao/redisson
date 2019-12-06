@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,41 +15,27 @@
  */
 package org.redisson.client.protocol.decoder;
 
-import java.io.IOException;
 import java.util.List;
 
-import org.redisson.client.codec.Codec;
 import org.redisson.client.codec.DoubleCodec;
 import org.redisson.client.handler.State;
+import org.redisson.client.protocol.Decoder;
 
-import io.netty.buffer.ByteBuf;
-import io.netty.util.CharsetUtil;
-
+/**
+ * 
+ * @author Nikita Koksharov
+ *
+ */
 public class GeoDistanceDecoder implements MultiDecoder<List<Object>> {
 
-    private final ThreadLocal<Integer> pos = new ThreadLocal<Integer>();
-    
-    private final Codec codec;
-    
-    public GeoDistanceDecoder(Codec codec) {
-        super();
-        this.codec = codec;
-    }
-
     @Override
-    public Object decode(ByteBuf buf, State state) throws IOException {
-        if (pos.get() % 2 == 0) {
-            return codec.getValueDecoder().decode(buf, state);
+    public Decoder<Object> getDecoder(int paramNum, State state) {
+        if (paramNum % 2 != 0) {
+            return DoubleCodec.INSTANCE.getValueDecoder();
         }
-        return DoubleCodec.INSTANCE.getValueDecoder().decode(buf, state);
+        return null;
     }
-
-    @Override
-    public boolean isApplicable(int paramNum, State state) {
-        pos.set(paramNum);
-        return true;
-    }
-
+    
     @Override
     public List<Object> decode(List<Object> parts, State state) {
         return parts;

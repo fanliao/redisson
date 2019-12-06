@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,28 +16,37 @@
 package org.redisson.connection;
 
 import java.net.InetSocketAddress;
-import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
 
 import org.redisson.api.ClusterNode;
 import org.redisson.api.NodeType;
+import org.redisson.api.RFuture;
 import org.redisson.client.RedisClient;
-import org.redisson.client.RedisConnection;
-import org.redisson.client.RedisException;
+import org.redisson.client.RedisTimeoutException;
 import org.redisson.client.codec.LongCodec;
+import org.redisson.client.codec.StringCodec;
 import org.redisson.client.protocol.RedisCommands;
+import org.redisson.client.protocol.Time;
+import org.redisson.command.CommandSyncService;
 import org.redisson.misc.RPromise;
+import org.redisson.misc.RedissonPromise;
 
+/**
+ * 
+ * @author Nikita Koksharov
+ *
+ */
 public class RedisClientEntry implements ClusterNode {
 
     private final RedisClient client;
-    private final ConnectionManager manager;
+    private final CommandSyncService commandExecutor;
     private final NodeType type;
 
-    public RedisClientEntry(RedisClient client, ConnectionManager manager, NodeType type) {
+    public RedisClientEntry(RedisClient client, CommandSyncService commandExecutor, NodeType type) {
         super();
         this.client = client;
-        this.manager = manager;
+        this.commandExecutor = commandExecutor;
         this.type = type;
     }
 
@@ -55,30 +64,42 @@ public class RedisClientEntry implements ClusterNode {
         return client.getAddr();
     }
 
-    private RedisConnection connect() {
-        RedisConnection c = client.connect();
-        RPromise<RedisConnection> future = manager.newPromise();
-        manager.getConnectListener().onConnect(future, c, null, manager.getConfig());
-        future.syncUninterruptibly();
-        return future.getNow();
+    @Override
+    public RFuture<Boolean> pingAsync() {
+        return pingAsync(1, TimeUnit.SECONDS);
     }
-
+    
+    @Override
+    public RFuture<Boolean> pingAsync(long timeout, TimeUnit timeUnit) {
+        RPromise<Boolean> result = new RedissonPromise<>();
+        RFuture<Boolean> f = commandExecutor.readAsync(client, null, RedisCommands.PING_BOOL);
+        f.onComplete((res, e) -> {
+            if (e != null) {
+                result.trySuccess(false);
+                return;
+            }
+            
+            result.trySuccess(res);
+        });
+        commandExecutor.getConnectionManager().newTimeout(t -> {
+            RedisTimeoutException ex = new RedisTimeoutException("Command execution timeout for command: PING, Redis client: " + client);
+            result.tryFailure(ex);
+        }, timeout, timeUnit);
+        return result;
+    }
+    
     @Override
     public boolean ping() {
-        RedisConnection c = null;
-        try {
-            c = connect();
-            return "PONG".equals(c.sync(RedisCommands.PING));
-        } catch (Exception e) {
-            return false;
-        } finally {
-            if (c != null) {
-                c.closeAsync();
-            }
-        }
+        return commandExecutor.get(pingAsync());
+    }
+    
+    @Override
+    public boolean ping(long timeout, TimeUnit timeUnit) {
+        return commandExecutor.get(pingAsync(timeout, timeUnit));
     }
 
     @Override
+    @SuppressWarnings("AvoidInlineConditionals")
     public int hashCode() {
         final int prime = 31;
         int result = 1;
@@ -103,34 +124,64 @@ public class RedisClientEntry implements ClusterNode {
         return true;
     }
 
-    public long time() {
-        RedisConnection c = null;
-        try {
-            c = connect();
-            List<String> parts = c.sync(RedisCommands.TIME);
-            return Long.valueOf(parts.get(0));
-        } catch (Exception e) {
-            throw new RedisException(e.getMessage(), e);
-        } finally {
-            if (c != null) {
-                c.closeAsync();
-            }
-        }
+    @Override
+    public RFuture<Time> timeAsync() {
+        return commandExecutor.readAsync(client, LongCodec.INSTANCE, RedisCommands.TIME);
     }
     
     @Override
-    public Map<String, String> info() {
-        RedisConnection c = null;
-        try {
-            c = connect();
-            return c.sync(RedisCommands.CLUSTER_INFO);
-        } catch (Exception e) {
-            return null;
-        } finally {
-            if (c != null) {
-                c.closeAsync();
-            }
+    public Time time() {
+        return commandExecutor.get(timeAsync());
+    }
+    
+    @Override
+    public RFuture<Map<String, String>> clusterInfoAsync() {
+        return commandExecutor.readAsync(client, StringCodec.INSTANCE, RedisCommands.CLUSTER_INFO);
+    }
+    
+    @Override
+    public Map<String, String> clusterInfo() {
+        return commandExecutor.get(clusterInfoAsync());
+    }
+    
+    @Override
+    public Map<String, String> info(InfoSection section) {
+        return commandExecutor.get(infoAsync(section));
+    }
+    
+    @Override
+    public RFuture<Map<String, String>> infoAsync(InfoSection section) {
+        if (section == InfoSection.ALL) {
+            return commandExecutor.readAsync(client, StringCodec.INSTANCE, RedisCommands.INFO_ALL);
+        } else if (section == InfoSection.DEFAULT) {
+                return commandExecutor.readAsync(client, StringCodec.INSTANCE, RedisCommands.INFO_DEFAULT);
+        } else if (section == InfoSection.SERVER) {
+            return commandExecutor.readAsync(client, StringCodec.INSTANCE, RedisCommands.INFO_SERVER);
+        } else if (section == InfoSection.CLIENTS) {
+            return commandExecutor.readAsync(client, StringCodec.INSTANCE, RedisCommands.INFO_CLIENTS);
+        } else if (section == InfoSection.MEMORY) {
+            return commandExecutor.readAsync(client, StringCodec.INSTANCE, RedisCommands.INFO_MEMORY);
+        } else if (section == InfoSection.PERSISTENCE) {
+            return commandExecutor.readAsync(client, StringCodec.INSTANCE, RedisCommands.INFO_PERSISTENCE);
+        } else if (section == InfoSection.STATS) {
+            return commandExecutor.readAsync(client, StringCodec.INSTANCE, RedisCommands.INFO_STATS);
+        } else if (section == InfoSection.REPLICATION) {
+            return commandExecutor.readAsync(client, StringCodec.INSTANCE, RedisCommands.INFO_REPLICATION);
+        } else if (section == InfoSection.CPU) {
+            return commandExecutor.readAsync(client, StringCodec.INSTANCE, RedisCommands.INFO_CPU);
+        } else if (section == InfoSection.COMMANDSTATS) {
+            return commandExecutor.readAsync(client, StringCodec.INSTANCE, RedisCommands.INFO_COMMANDSTATS);
+        } else if (section == InfoSection.CLUSTER) {
+            return commandExecutor.readAsync(client, StringCodec.INSTANCE, RedisCommands.INFO_CLUSTER);
+        } else if (section == InfoSection.KEYSPACE) {
+            return commandExecutor.readAsync(client, StringCodec.INSTANCE, RedisCommands.INFO_KEYSPACE);
         }
+        throw new IllegalStateException();
     }
 
+    @Override
+    public String toString() {
+        return "RedisClientEntry [client=" + client + ", type=" + type + "]";
+    }
+    
 }

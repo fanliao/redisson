@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ public interface StatusListener extends EventListener {
 
     /**
      * Executes then Redisson successfully subscribed to channel.
-     * Invoked during re-connection
+     * Invoked during re-connection or failover process
      * 
      * @param channel to subscribe
      */

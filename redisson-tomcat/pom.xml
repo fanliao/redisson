@@ -4,7 +4,7 @@
     <parent>
         <groupId>org.redisson</groupId>
         <artifactId>redisson-parent</artifactId>
-        <version>2.7.1-SNAPSHOT</version>
+        <version>3.11.7-SNAPSHOT</version>
         <relativePath>../</relativePath>
     </parent>
 
@@ -14,50 +14,19 @@
     <name>Redisson/Tomcat</name>
 
     <modules>
-        <module>redisson-tomcat-6</module>
         <module>redisson-tomcat-7</module>
         <module>redisson-tomcat-8</module>
+        <module>redisson-tomcat-9</module>
     </modules>
 
     <build>
         <plugins>
             <plugin>
                 <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.5.1</version>
-                <configuration>
-                    <source>${source.version}</source>
-                    <target>${source.version}</target>
-                    <optimize>true</optimize>
-                    <showDeprecations>true</showDeprecations>
-                </configuration>
-                <executions>
-                    <execution>
-                        <id>default-testCompile</id>
-                        <phase>process-test-sources</phase>
-                        <goals>
-                            <goal>testCompile</goal>
-                        </goals>
-                        <configuration>
-                            <fork>true</fork>
-                            <source>${test.source.version}</source>
-                            <target>${test.source.version}</target>
-                        </configuration>
-                    </execution>
-                </executions>
             </plugin>
 
             <plugin>
-         	<groupId>org.apache.maven.plugins</groupId>
          	<artifactId>maven-javadoc-plugin</artifactId>
-         	<version>2.10.4</version>
-         	<executions>
-                   <execution>
-                     <id>attach-javadocs</id>
-                     <goals>
-                         <goal>jar</goal>
-                     </goals>
-                   </execution>
-         	</executions>
             </plugin>
         </plugins>
     </build>

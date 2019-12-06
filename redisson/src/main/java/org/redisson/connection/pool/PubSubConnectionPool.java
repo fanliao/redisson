@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ package org.redisson.connection.pool;
 
 import org.redisson.api.RFuture;
 import org.redisson.client.RedisPubSubConnection;
+import org.redisson.client.protocol.RedisCommands;
 import org.redisson.config.MasterSlaveServersConfig;
 import org.redisson.connection.ClientConnectionsEntry;
 import org.redisson.connection.ConnectionManager;
@@ -34,6 +35,10 @@ public class PubSubConnectionPool extends ConnectionPool<RedisPubSubConnection> 
         super(config, connectionManager, masterSlaveEntry);
     }
 
+    public RFuture<RedisPubSubConnection> get() {
+        return get(RedisCommands.PUBLISH);
+    }
+    
     @Override
     protected RedisPubSubConnection poll(ClientConnectionsEntry entry) {
         return entry.pollSubscribeConnection();
@@ -41,7 +46,7 @@ public class PubSubConnectionPool extends ConnectionPool<RedisPubSubConnection> 
 
     @Override
     protected int getMinimumIdleSize(ClientConnectionsEntry entry) {
-        return config.getSlaveSubscriptionConnectionMinimumIdleSize();
+        return config.getSubscriptionConnectionMinimumIdleSize();
     }
 
     @Override

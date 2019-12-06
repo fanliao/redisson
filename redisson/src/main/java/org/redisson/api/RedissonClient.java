@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,18 +19,52 @@ import java.util.concurrent.TimeUnit;
 
 import org.redisson.client.codec.Codec;
 import org.redisson.config.Config;
-import org.redisson.codec.CodecProvider;
-import org.redisson.liveobject.provider.ResolverProvider;
 
 /**
  * Main Redisson interface for access
  * to all redisson objects with sync/async interface.
+ * 
+ * @see RedissonReactiveClient
  *
  * @author Nikita Koksharov
  *
  */
 public interface RedissonClient {
 
+    /**
+     * Returns stream instance by <code>name</code>
+     * <p>
+     * Requires <b>Redis 5.0.0 and higher.</b>
+     * 
+     * @param <K> type of key
+     * @param <V> type of value
+     * @param name of stream
+     * @return RStream object
+     */
+    <K, V> RStream<K, V> getStream(String name);
+    
+    /**
+     * Returns stream instance by <code>name</code>
+     * using provided <code>codec</code> for entries.
+     * <p>
+     * Requires <b>Redis 5.0.0 and higher.</b>
+     * 
+     * @param <K> type of key
+     * @param <V> type of value
+     * @param name - name of stream
+     * @param codec - codec for entry
+     * @return RStream object
+     */
+    <K, V> RStream<K, V> getStream(String name, Codec codec);
+    
+    /**
+     * Returns rate limiter instance by <code>name</code>
+     * 
+     * @param name of rate limiter
+     * @return RateLimiter object
+     */
+    RRateLimiter getRateLimiter(String name);
+    
     /**
      * Returns binary stream holder instance by <code>name</code>
      * 
@@ -87,23 +121,39 @@ public interface RedissonClient {
     /**
      * Returns map-based cache instance by <code>name</code>
      * using provided <code>codec</code> for both cache keys and values.
-     * Supports entry eviction with a given TTL value.
-     *
-     * <p>If eviction is not required then it's better to use regular map {@link #getMap(String, Codec)}.</p>
+     * Supports entry eviction with a given MaxIdleTime and TTL settings.
+     * <p>
+     * If eviction is not required then it's better to use regular map {@link #getMap(String, Codec)}.
      *
      * @param <K> type of key
      * @param <V> type of value
-     * @param name - name of object
+     * @param name - object name
      * @param codec - codec for keys and values
      * @return MapCache object
      */
     <K, V> RMapCache<K, V> getMapCache(String name, Codec codec);
+    
+    /**
+     * Returns map-based cache instance by <code>name</code>
+     * using provided <code>codec</code> for both cache keys and values.
+     * Supports entry eviction with a given MaxIdleTime and TTL settings.
+     * <p>
+     * If eviction is not required then it's better to use regular map {@link #getMap(String, Codec)}.
+     * 
+     * @param <K> type of key
+     * @param <V> type of value
+     * @param name - object name
+     * @param codec - codec for keys and values
+     * @param options - map options
+     * @return MapCache object
+     */
+    <K, V> RMapCache<K, V> getMapCache(String name, Codec codec, MapOptions<K, V> options);
 
     /**
      * Returns map-based cache instance by name.
-     * Supports entry eviction with a given TTL value.
-     *
-     * <p>If eviction is not required then it's better to use regular map {@link #getMap(String)}.</p>
+     * Supports entry eviction with a given MaxIdleTime and TTL settings.
+     * <p>
+     * If eviction is not required then it's better to use regular map {@link #getMap(String)}.</p>
      *
      * @param <K> type of key
      * @param <V> type of value
@@ -111,6 +161,20 @@ public interface RedissonClient {
      * @return MapCache object
      */
     <K, V> RMapCache<K, V> getMapCache(String name);
+    
+    /**
+     * Returns map-based cache instance by name.
+     * Supports entry eviction with a given MaxIdleTime and TTL settings.
+     * <p>
+     * If eviction is not required then it's better to use regular map {@link #getMap(String)}.</p>
+     *
+     * @param <K> type of key
+     * @param <V> type of value
+     * @param name - name of object
+     * @param options - map options
+     * @return MapCache object
+     */
+    <K, V> RMapCache<K, V> getMapCache(String name, MapOptions<K, V> options);
 
     /**
      * Returns object holder instance by name.
@@ -248,7 +312,7 @@ public interface RedissonClient {
      * @param options - local map options
      * @return LocalCachedMap object
      */
-    <K, V> RLocalCachedMap<K, V> getLocalCachedMap(String name, LocalCachedMapOptions options);
+    <K, V> RLocalCachedMap<K, V> getLocalCachedMap(String name, LocalCachedMapOptions<K, V> options);
     
     /**
      * Returns local cached map instance by name
@@ -261,7 +325,7 @@ public interface RedissonClient {
      * @param options - local map options
      * @return LocalCachedMap object
      */
-    <K, V> RLocalCachedMap<K, V> getLocalCachedMap(String name, Codec codec, LocalCachedMapOptions options);
+    <K, V> RLocalCachedMap<K, V> getLocalCachedMap(String name, Codec codec, LocalCachedMapOptions<K, V> options);
     
     /**
      * Returns map instance by name.
@@ -274,6 +338,17 @@ public interface RedissonClient {
     <K, V> RMap<K, V> getMap(String name);
 
     /**
+     * Returns map instance by name.
+     *
+     * @param <K> type of key
+     * @param <V> type of value
+     * @param name - name of object
+     * @param options - map options
+     * @return Map object
+     */
+    <K, V> RMap<K, V> getMap(String name, MapOptions<K, V> options);
+
+    /**
      * Returns map instance by name
      * using provided codec for both map keys and values.
      *
@@ -284,6 +359,19 @@ public interface RedissonClient {
      * @return Map object
      */
     <K, V> RMap<K, V> getMap(String name, Codec codec);
+
+    /**
+     * Returns map instance by name
+     * using provided codec for both map keys and values.
+     *
+     * @param <K> type of key
+     * @param <V> type of value
+     * @param name - name of object
+     * @param codec - codec for keys and values
+     * @param options - map options
+     * @return Map object
+     */
+    <K, V> RMap<K, V> getMap(String name, Codec codec, MapOptions<K, V> options);
 
     /**
      * Returns Set based Multimap instance by name.
@@ -353,7 +441,7 @@ public interface RedissonClient {
     RPermitExpirableSemaphore getPermitExpirableSemaphore(String name);
 
     /**
-     * Returns lock instance by name.
+     * Returns Lock instance by name.
      * <p>
      * Implements a <b>non-fair</b> locking so doesn't guarantees an acquire order by threads.
      *
@@ -363,7 +451,23 @@ public interface RedissonClient {
     RLock getLock(String name);
 
     /**
-     * Returns lock instance by name.
+     * Returns MultiLock instance associated with specified <code>locks</code>
+     * 
+     * @param locks - collection of locks
+     * @return MultiLock object
+     */
+    RLock getMultiLock(RLock... locks);
+    
+    /**
+     * Returns RedLock instance associated with specified <code>locks</code>
+     * 
+     * @param locks - collection of locks
+     * @return RedLock object
+     */
+    RLock getRedLock(RLock... locks);
+    
+    /**
+     * Returns Lock instance by name.
      * <p>
      * Implements a <b>fair</b> locking so it guarantees an acquire order by threads.
      * 
@@ -373,7 +477,7 @@ public interface RedissonClient {
     RLock getFairLock(String name);
     
     /**
-     * Returns readWriteLock instance by name.
+     * Returns ReadWriteLock instance by name.
      *
      * @param name - name of object
      * @return Lock object
@@ -385,7 +489,7 @@ public interface RedissonClient {
      * 
      * @param <V> type of value
      * @param name - name of object
-     * @return Lock object
+     * @return Set object
      */
     <V> RSet<V> getSet(String name);
 
@@ -457,22 +561,20 @@ public interface RedissonClient {
     /**
      * Returns topic instance by name.
      * 
-     * @param <M> type of message
      * @param name - name of object
      * @return Topic object
      */
-    <M> RTopic<M> getTopic(String name);
+    RTopic getTopic(String name);
 
     /**
      * Returns topic instance by name
      * using provided codec for messages.
      *
-     * @param <M> type of message
      * @param name - name of object
      * @param codec - codec for message
      * @return Topic object
      */
-    <M> RTopic<M> getTopic(String name, Codec codec);
+    RTopic getTopic(String name, Codec codec);
 
     /**
      * Returns topic instance satisfies by pattern name.
@@ -482,11 +584,10 @@ public interface RedissonClient {
      *    h*llo subscribes to hllo and heeeello
      *    h[ae]llo subscribes to hello and hallo, but not hillo
      * 
-     * @param <M> type of message
      * @param pattern of the topic
      * @return PatterTopic object
      */
-    <M> RPatternTopic<M> getPatternTopic(String pattern);
+    RPatternTopic getPatternTopic(String pattern);
 
     /**
      * Returns topic instance satisfies by pattern name
@@ -497,23 +598,12 @@ public interface RedissonClient {
      *    h*llo subscribes to hllo and heeeello
      *    h[ae]llo subscribes to hello and hallo, but not hillo
      * 
-     * @param <M> type of message
      * @param pattern of the topic
      * @param codec - codec for message
      * @return PatterTopic object
      */
-    <M> RPatternTopic<M> getPatternTopic(String pattern, Codec codec);
+    RPatternTopic getPatternTopic(String pattern, Codec codec);
 
-    /**
-     * Returns unbounded fair queue instance by name.
-     * 
-     * @param name of queue
-     * @return queue
-     */
-    <V> RBlockingFairQueue<V> getBlockingFairQueue(String name);
-    
-    <V> RBlockingFairQueue<V> getBlockingFairQueue(String name, Codec codec);
-    
     /**
      * Returns unbounded queue instance by name.
      *
@@ -529,8 +619,9 @@ public interface RedissonClient {
      * Could be attached to destination queue only.
      * All elements are inserted with transfer delay to destination queue.
      * 
+     * @param <V> type of value
      * @param destinationQueue - destination queue
-     * @return delayed queue
+     * @return Delayed queue object
      */
     <V> RDelayedQueue<V> getDelayedQueue(RQueue<V> destinationQueue);
 
@@ -544,7 +635,114 @@ public interface RedissonClient {
      * @return Queue object
      */
     <V> RQueue<V> getQueue(String name, Codec codec);
+    
+    /**
+     * Returns RingBuffer based queue.
+     * 
+     * @param <V> value type
+     * @param name - name of object
+     * @return RingBuffer object
+     */
+    <V> RRingBuffer<V> getRingBuffer(String name);
+    
+    /**
+     * Returns RingBuffer based queue.
+     * 
+     * @param <V> value type
+     * @param name - name of object
+     * @param codec - codec for values
+     * @return RingBuffer object
+     */
+    <V> RRingBuffer<V> getRingBuffer(String name, Codec codec);
 
+    /**
+     * Returns priority unbounded queue instance by name.
+     * It uses comparator to sort objects.
+     *
+     * @param <V> type of value
+     * @param name of object
+     * @return Queue object
+     */
+    <V> RPriorityQueue<V> getPriorityQueue(String name);
+    
+    /**
+     * Returns priority unbounded queue instance by name
+     * using provided codec for queue objects.
+     * It uses comparator to sort objects.
+     *
+     * @param <V> type of value
+     * @param name - name of object
+     * @param codec - codec for message
+     * @return Queue object
+     */
+    <V> RPriorityQueue<V> getPriorityQueue(String name, Codec codec);
+
+    /**
+     * Returns unbounded priority blocking queue instance by name.
+     * It uses comparator to sort objects.
+     *
+     * @param <V> type of value
+     * @param name of object
+     * @return Queue object
+     */
+    <V> RPriorityBlockingQueue<V> getPriorityBlockingQueue(String name);
+    
+    /**
+     * Returns unbounded priority blocking queue instance by name
+     * using provided codec for queue objects.
+     * It uses comparator to sort objects.
+     *
+     * @param <V> type of value
+     * @param name - name of object
+     * @param codec - codec for message
+     * @return Queue object
+     */
+    <V> RPriorityBlockingQueue<V> getPriorityBlockingQueue(String name, Codec codec);
+
+    /**
+     * Returns unbounded priority blocking deque instance by name.
+     * It uses comparator to sort objects.
+     *
+     * @param <V> type of value
+     * @param name of object
+     * @return Queue object
+     */
+    <V> RPriorityBlockingDeque<V> getPriorityBlockingDeque(String name);
+    
+    /**
+     * Returns unbounded priority blocking deque instance by name
+     * using provided codec for queue objects.
+     * It uses comparator to sort objects.
+     *
+     * @param <V> type of value
+     * @param name - name of object
+     * @param codec - codec for message
+     * @return Queue object
+     */
+    <V> RPriorityBlockingDeque<V> getPriorityBlockingDeque(String name, Codec codec);
+    
+    /**
+     * Returns priority unbounded deque instance by name.
+     * It uses comparator to sort objects.
+     *
+     * @param <V> type of value
+     * @param name of object
+     * @return Queue object
+     */
+    <V> RPriorityDeque<V> getPriorityDeque(String name);
+    
+    /**
+     * Returns priority unbounded deque instance by name
+     * using provided codec for queue objects.
+     * It uses comparator to sort objects.
+     *
+     * @param <V> type of value
+     * @param name - name of object
+     * @param codec - codec for message
+     * @return Queue object
+     */
+    <V> RPriorityDeque<V> getPriorityDeque(String name, Codec codec);
+    
     /**
      * Returns unbounded blocking queue instance by name.
      * 
@@ -642,6 +840,22 @@ public interface RedissonClient {
     RAtomicDouble getAtomicDouble(String name);
 
     /**
+     * Returns LongAdder instances by name.
+     * 
+     * @param name - name of object
+     * @return LongAdder object
+     */
+    RLongAdder getLongAdder(String name);
+
+    /**
+     * Returns DoubleAdder instances by name.
+     * 
+     * @param name - name of object
+     * @return LongAdder object
+     */
+    RDoubleAdder getDoubleAdder(String name);
+    
+    /**
      * Returns countDownLatch instance by name.
      *
      * @param name - name of object
@@ -683,6 +897,14 @@ public interface RedissonClient {
      * @return Script object
      */
     RScript getScript();
+    
+    /**
+     * Returns script operations object using provided codec.
+     * 
+     * @param codec - codec for params and result
+     * @return Script object
+     */
+    RScript getScript(Codec codec);
 
     /**
      * Returns ScheduledExecutorService by name
@@ -693,14 +915,50 @@ public interface RedissonClient {
     RScheduledExecutorService getExecutorService(String name);
 
     /**
+     * Returns ScheduledExecutorService by name
+     * 
+     * @param name - name of object
+     * @param options - options for executor
+     * @return ScheduledExecutorService object
+     */
+    RScheduledExecutorService getExecutorService(String name, ExecutorOptions options);
+    
+    /**
+     * Returns ScheduledExecutorService by name 
+     * using provided codec for task, response and request serialization
+     * 
+     * Please use getExecutorService(String name, Codec codec) method instead.
+     * 
+     * @deprecated - use {@link #getExecutorService(String, Codec)} instead.
+     * 
+     * @param name - name of object
+     * @param codec - codec for task, response and request
+     * @return ScheduledExecutorService object
+     */
+    @Deprecated
+    RScheduledExecutorService getExecutorService(Codec codec, String name);
+    
+    /**
      * Returns ScheduledExecutorService by name 
      * using provided codec for task, response and request serialization
      * 
      * @param name - name of object
      * @param codec - codec for task, response and request
      * @return ScheduledExecutorService object
+     * @since 2.8.2
      */
-    RScheduledExecutorService getExecutorService(Codec codec, String name);
+    RScheduledExecutorService getExecutorService(String name, Codec codec);
+
+    /**
+     * Returns ScheduledExecutorService by name 
+     * using provided codec for task, response and request serialization
+     * 
+     * @param name - name of object
+     * @param codec - codec for task, response and request
+     * @param options - options for executor
+     * @return ScheduledExecutorService object
+     */
+    RScheduledExecutorService getExecutorService(String name, Codec codec, ExecutorOptions options);
     
     /**
      * Returns object for remote operations prefixed with the default name (redisson_remote_service)
@@ -737,15 +995,34 @@ public interface RedissonClient {
     RRemoteService getRemoteService(String name, Codec codec);
 
     /**
-     * Return batch object which executes group of
-     * command in pipeline.
+     * Creates transaction with <b>READ_COMMITTED</b> isolation level.
+     * 
+     * @param options - transaction configuration
+     * @return Transaction object
+     */
+    RTransaction createTransaction(TransactionOptions options);
+
+    /**
+     * Creates batch object which could be executed later 
+     * with collected group of commands in pipeline mode.
+     * <p>
+     * See <a href="http://redis.io/topics/pipelining">http://redis.io/topics/pipelining</a>
      *
+     * @param options - batch configuration
+     * @return Batch object
+     */
+    RBatch createBatch(BatchOptions options);
+
+    /**
+     * Creates batch object which could be executed later 
+     * with collected group of commands in pipeline mode.
+     * <p>
      * See <a href="http://redis.io/topics/pipelining">http://redis.io/topics/pipelining</a>
      *
      * @return Batch object
      */
     RBatch createBatch();
-
+    
     /**
      * Returns interface with methods for Redis keys.
      * Each of Redis/Redisson object associated with own key
@@ -765,12 +1042,12 @@ public interface RedissonClient {
     /**
      * Shutdown Redisson instance but <b>NOT</b> Redis server
      * 
-     * This equates to invoke shutdown(2, 15, TimeUnit.SECONDS);
+     * This equates to invoke shutdown(0, 2, TimeUnit.SECONDS);
      */
     void shutdown();
     
     /**
-     * Shuts down Redisson instance <b>NOT</b> Redis server
+     * Shuts down Redisson instance but <b>NOT</b> Redis server
      * 
      * Shutdown ensures that no tasks are submitted for <i>'the quiet period'</i>
      * (usually a couple seconds) before it shuts itself down.  If a task is submitted during the quiet period,
@@ -793,21 +1070,6 @@ public interface RedissonClient {
     Config getConfig();
 
     /**
-     * Returns the CodecProvider instance
-     * 
-     * @return CodecProvider object
-     */
-    public CodecProvider getCodecProvider();
-    
-    /**
-     * Returns the ResolverProvider instance
-     * 
-     * @return ResolverProvider object
-     */
-    public ResolverProvider getResolverProvider();
-
-    
-    /**
      * Get Redis nodes group for server operations
      *
      * @return NodesGroup object
@@ -824,7 +1086,7 @@ public interface RedissonClient {
     /**
      * Returns {@code true} if this Redisson instance has been shut down.
      *
-     * @return code true} if this Redisson instance has been shut down overwise <code>false</code>
+     * @return {@code true} if this Redisson instance has been shut down overwise <code>false</code>
      */
     boolean isShutdown();
 
@@ -836,5 +1098,12 @@ public interface RedissonClient {
      * or was shutdown {@link #isShutdown()} already.
      */
     boolean isShuttingDown();
+
+    /**
+     * Returns id of this Redisson instance
+     * 
+     * @return id
+     */
+    String getId();
 
 }

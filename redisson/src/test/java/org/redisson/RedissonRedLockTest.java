@@ -17,13 +17,27 @@ import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.redisson.config.Config;
 
-import static com.jayway.awaitility.Awaitility.await;
+import static org.awaitility.Awaitility.await;
 import static org.assertj.core.api.Assertions.assertThat;
 
 public class RedissonRedLockTest {
 
     @Test
-    public void testLockLeasetime() throws IOException, InterruptedException {
+    public void testLockLeasetimeWithMilliSeconds() throws IOException, InterruptedException {
+        testLockLeasetime(2000, TimeUnit.MILLISECONDS);
+    }
+
+    @Test
+    public void testLockLeasetimeWithSeconds() throws IOException, InterruptedException {
+        testLockLeasetime(2, TimeUnit.SECONDS);
+    }
+
+    @Test
+    public void testLockLeasetimeWithMinutes() throws IOException, InterruptedException {
+        testLockLeasetime(1, TimeUnit.MINUTES);
+    }
+
+    private void testLockLeasetime(final long leaseTime, final TimeUnit unit) throws IOException, InterruptedException {
         RedisProcess redis1 = redisTestMultilockInstance();
         RedisProcess redis2 = redisTestMultilockInstance();
         
@@ -47,7 +61,7 @@ public class RedissonRedLockTest {
             executor.submit(() -> {
                 for (int j = 0; j < 5; j++) {
                     try {
-                        lock.lock(2, TimeUnit.SECONDS);
+                        lock.lock(leaseTime, unit);
                         int nextValue = counter.get() + 1;
                         Thread.sleep(1000);
                         counter.set(nextValue);
@@ -157,6 +171,39 @@ public class RedissonRedLockTest {
         assertThat(redis2.stop()).isEqualTo(0);
     }
 
+    @Test
+    public void testLockSuccess2() throws IOException, InterruptedException {
+        RedisProcess redis1 = redisTestMultilockInstance();
+        RedisProcess redis2 = redisTestMultilockInstance();
+
+        RedissonClient client1 = createClient(redis1.getRedisServerAddressAndPort());
+        RedissonClient client2 = createClient(redis2.getRedisServerAddressAndPort());
+
+        RLock lock1 = client1.getLock("lock1");
+        RLock lock2 = client1.getLock("lock2");
+        RLock lock3 = client2.getLock("lock3");
+        
+        Thread t1 = new Thread() {
+            public void run() {
+                lock2.lock();
+            };
+        };
+        t1.start();
+        t1.join();
+        
+        RedissonMultiLock lock = new RedissonRedLock(lock1, lock2, lock3);
+
+        assertThat(lock.tryLock(500, 5000, TimeUnit.MILLISECONDS)).isTrue();
+        Thread.sleep(3000);
+        
+        lock.unlock();
+
+        client1.shutdown();
+        client2.shutdown();
+        
+        assertThat(redis1.stop()).isEqualTo(0);
+        assertThat(redis2.stop()).isEqualTo(0);        
+    }
     
     @Test
     public void testLockSuccess() throws IOException, InterruptedException {
@@ -170,9 +217,21 @@ public class RedissonRedLockTest {
         RLock lock2 = client1.getLock("lock2");
         RLock lock3 = client2.getLock("lock3");
         
+        testLock(lock1, lock2, lock3, lock1);
+        testLock(lock1, lock2, lock3, lock2);
+        testLock(lock1, lock2, lock3, lock3);
+        
+        client1.shutdown();
+        client2.shutdown();
+        
+        assertThat(redis1.stop()).isEqualTo(0);
+        assertThat(redis2.stop()).isEqualTo(0);
+    }
+
+    protected void testLock(RLock lock1, RLock lock2, RLock lock3, RLock lockFirst) throws InterruptedException {
         Thread t1 = new Thread() {
             public void run() {
-                lock3.lock();
+                lockFirst.lock();
             };
         };
         t1.start();
@@ -193,17 +252,11 @@ public class RedissonRedLockTest {
         t.start();
         t.join(1000);
 
-        lock3.delete();
+        lockFirst.forceUnlock();
         
         RedissonMultiLock lock = new RedissonRedLock(lock1, lock2, lock3);
         lock.lock();
         lock.unlock();
-        
-        client1.shutdown();
-        client2.shutdown();
-        
-        assertThat(redis1.stop()).isEqualTo(0);
-        assertThat(redis2.stop()).isEqualTo(0);
     }
 
     
@@ -316,7 +369,7 @@ public class RedissonRedLockTest {
         t.start();
         t.join();
 
-        await().atMost(5, TimeUnit.SECONDS).until(() -> assertThat(executed.get()).isTrue());
+        await().atMost(5, TimeUnit.SECONDS).untilTrue(executed);
 
         lock.unlock();
 

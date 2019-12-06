@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@
 package org.redisson.jcache;
 
 import java.io.IOException;
-import java.nio.ByteOrder;
 import java.util.ArrayList;
 import java.util.List;
 
@@ -26,6 +25,7 @@ import org.redisson.client.protocol.Decoder;
 import org.redisson.client.protocol.Encoder;
 
 import io.netty.buffer.ByteBuf;
+import io.netty.util.internal.PlatformDependent;
 
 /**
  * 
@@ -35,26 +35,45 @@ import io.netty.buffer.ByteBuf;
 public class JCacheEventCodec implements Codec {
 
     private final Codec codec;
+    private final boolean sync;
+    
     private final Decoder<Object> decoder = new Decoder<Object>() {
         @Override
         public Object decode(ByteBuf buf, State state) throws IOException {
             List<Object> result = new ArrayList<Object>();
-            int keyLen = buf.order(ByteOrder.LITTLE_ENDIAN).readInt();
+            int keyLen;
+            if (PlatformDependent.isWindows()) {
+                keyLen = buf.readIntLE();
+            } else {
+                keyLen = (int) buf.readLongLE();
+            }
             ByteBuf keyBuf = buf.readSlice(keyLen);
             Object key = codec.getMapKeyDecoder().decode(keyBuf, state);
             result.add(key);
 
-            int valueLen = buf.order(ByteOrder.LITTLE_ENDIAN).readInt();
+            int valueLen;
+            if (PlatformDependent.isWindows()) {
+                valueLen = buf.readIntLE();
+            } else {
+                valueLen = (int) buf.readLongLE();
+            }
             ByteBuf valueBuf = buf.readSlice(valueLen);
             Object value = codec.getMapValueDecoder().decode(valueBuf, state);
             result.add(value);
+            
+            if (sync) {
+                double syncId = buf.readDoubleLE();
+                result.add(syncId);
+            }
+            
             return result;
         }
     };
 
-    public JCacheEventCodec(Codec codec) {
+    public JCacheEventCodec(Codec codec, boolean sync) {
         super();
         this.codec = codec;
+        this.sync = sync;
     }
 
     @Override
@@ -85,6 +104,11 @@ public class JCacheEventCodec implements Codec {
     @Override
     public Encoder getValueEncoder() {
         throw new UnsupportedOperationException();
+    }
+    
+    @Override
+    public ClassLoader getClassLoader() {
+        return getClass().getClassLoader();
     }
 
 }

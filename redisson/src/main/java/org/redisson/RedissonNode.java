@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -19,9 +19,13 @@ import java.io.File;
 import java.io.IOException;
 import java.net.InetSocketAddress;
 import java.util.Map.Entry;
+import java.util.concurrent.ThreadLocalRandom;
+import java.util.concurrent.TimeUnit;
 
+import org.redisson.api.RExecutorService;
 import org.redisson.api.RFuture;
 import org.redisson.api.RedissonClient;
+import org.redisson.api.WorkerOptions;
 import org.redisson.client.RedisConnection;
 import org.redisson.config.RedissonNodeConfig;
 import org.redisson.connection.ConnectionManager;
@@ -30,14 +34,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 import io.netty.buffer.ByteBufUtil;
-import io.netty.util.internal.ThreadLocalRandom;
 
 /**
  * 
  * @author Nikita Koksharov
  *
  */
-public class RedissonNode {
+public final class RedissonNode {
 
     private static final Logger log = LoggerFactory.getLogger(RedissonNode.class);
     
@@ -48,7 +51,7 @@ public class RedissonNode {
     private InetSocketAddress remoteAddress;
     private InetSocketAddress localAddress;
     
-    private RedissonNode(RedissonNodeConfig config, Redisson redisson) {
+    private RedissonNode(RedissonNodeConfig config, RedissonClient redisson) {
         this.config = new RedissonNodeConfig(config);
         this.id = generateId();
         this.redisson = redisson;
@@ -73,7 +76,6 @@ public class RedissonNode {
     
     private String generateId() {
         byte[] id = new byte[8];
-        // TODO JDK UPGRADE replace to native ThreadLocalRandom
         ThreadLocalRandom.current().nextBytes(id);
         return ByteBufUtil.hexDump(id);
     }
@@ -114,7 +116,7 @@ public class RedissonNode {
      */
     public void shutdown() {
         if (hasRedissonInstance) {
-            redisson.shutdown();
+            redisson.shutdown(0, 15, TimeUnit.MINUTES);
             log.info("Redisson node has been shutdown successfully");
         }
     }
@@ -127,27 +129,46 @@ public class RedissonNode {
             redisson = Redisson.create(config);
         }
         
-        retrieveAdresses();
+        retrieveAddresses();
         
         if (config.getRedissonNodeInitializer() != null) {
             config.getRedissonNodeInitializer().onStartup(this);
         }
         
+        int mapReduceWorkers = config.getMapReduceWorkers();
+        if (mapReduceWorkers != -1) {
+            if (mapReduceWorkers == 0) {
+                mapReduceWorkers = Runtime.getRuntime().availableProcessors();
+            }
+            
+            WorkerOptions options = WorkerOptions.defaults()
+                                                .workers(mapReduceWorkers)
+                                                .beanFactory(config.getBeanFactory());
+            
+            redisson.getExecutorService(RExecutorService.MAPREDUCE_NAME).registerWorkers(options);
+            log.info("{} map reduce worker(s) registered", mapReduceWorkers);
+        }
+        
         for (Entry<String, Integer> entry : config.getExecutorServiceWorkers().entrySet()) {
             String name = entry.getKey();
             int workers = entry.getValue();
-            redisson.getExecutorService(name).registerWorkers(workers);
-            log.info("{} worker(s) for '{}' ExecutorService registered", workers, name);
+            
+            WorkerOptions options = WorkerOptions.defaults()
+                                                .workers(workers)
+                                                .beanFactory(config.getBeanFactory());
+            
+            redisson.getExecutorService(name).registerWorkers(options);
+            log.info("{} worker(s) registered for ExecutorService with '{}' name", workers, name);
         }
 
         log.info("Redisson node started!");
     }
 
-    private void retrieveAdresses() {
-        ConnectionManager connectionManager = ((Redisson)redisson).getConnectionManager();
+    private void retrieveAddresses() {
+        ConnectionManager connectionManager = ((Redisson) redisson).getConnectionManager();
         for (MasterSlaveEntry entry : connectionManager.getEntrySet()) {
-            RFuture<RedisConnection> readFuture = entry.connectionReadOp();
-            if (readFuture.awaitUninterruptibly((long)connectionManager.getConfig().getConnectTimeout()) 
+            RFuture<RedisConnection> readFuture = entry.connectionReadOp(null);
+            if (readFuture.awaitUninterruptibly((long) connectionManager.getConfig().getConnectTimeout()) 
                     && readFuture.isSuccess()) {
                 RedisConnection connection = readFuture.getNow();
                 entry.releaseRead(connection);
@@ -155,8 +176,8 @@ public class RedissonNode {
                 localAddress = (InetSocketAddress) connection.getChannel().localAddress();
                 return;
             }
-            RFuture<RedisConnection> writeFuture = entry.connectionWriteOp();
-            if (writeFuture.awaitUninterruptibly((long)connectionManager.getConfig().getConnectTimeout())
+            RFuture<RedisConnection> writeFuture = entry.connectionWriteOp(null);
+            if (writeFuture.awaitUninterruptibly((long) connectionManager.getConfig().getConnectTimeout())
                     && writeFuture.isSuccess()) {
                 RedisConnection connection = writeFuture.getNow();
                 entry.releaseWrite(connection);
@@ -184,11 +205,7 @@ public class RedissonNode {
      * @param redisson instance
      * @return RedissonNode instance
      */
-    public static RedissonNode create(RedissonNodeConfig config, Redisson redisson) {
-        if (config.getExecutorServiceWorkers().isEmpty()) {
-            throw new IllegalArgumentException("Executor service workers are empty");
-        }
-        
+    public static RedissonNode create(RedissonNodeConfig config, RedissonClient redisson) {
         return new RedissonNode(config, redisson);
     }
     

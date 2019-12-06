@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
  */
 package org.redisson.client.protocol;
 
-import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 
@@ -91,14 +90,20 @@ public class CommandData<T, R> implements QueueCommand {
 
     @Override
     public List<CommandData<Object, Object>> getPubSubOperations() {
-        if (PUBSUB_COMMANDS.contains(getCommand().getName())) {
-            return Collections.singletonList((CommandData<Object, Object>)this);
+        if (RedisCommands.PUBSUB_COMMANDS.contains(getCommand().getName())) {
+            return Collections.singletonList((CommandData<Object, Object>) this);
         }
         return Collections.emptyList();
     }
     
     public boolean isBlockingCommand() {
-        return QueueCommand.TIMEOUTLESS_COMMANDS.contains(command.getName()) && !promise.isDone();
+        return RedisCommands.BLOCKING_COMMAND_NAMES.contains(command.getName()) 
+                || RedisCommands.BLOCKING_COMMANDS.contains(command);
+    }
+
+    @Override
+    public boolean isExecuted() {
+        return promise.isDone();
     }
 
 }

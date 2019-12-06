@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,20 +15,19 @@
  */
 package org.redisson.reactive;
 
-import java.net.InetSocketAddress;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.List;
-import java.util.Set;
-
 import org.reactivestreams.Publisher;
 import org.redisson.RedissonSet;
-import org.redisson.api.RSetReactive;
-import org.redisson.client.codec.Codec;
-import org.redisson.client.protocol.RedisCommands;
+import org.redisson.api.RFuture;
+import org.redisson.api.RLockReactive;
+import org.redisson.api.RPermitExpirableSemaphoreReactive;
+import org.redisson.api.RReadWriteLockReactive;
+import org.redisson.api.RSemaphoreReactive;
+import org.redisson.api.RSet;
+import org.redisson.api.RedissonReactiveClient;
+import org.redisson.client.RedisClient;
 import org.redisson.client.protocol.decoder.ListScanResult;
-import org.redisson.command.CommandReactiveExecutor;
+
+import reactor.core.publisher.Flux;
 
 /**
  * Distributed and concurrent implementation of {@link java.util.Set}
@@ -37,129 +36,69 @@ import org.redisson.command.CommandReactiveExecutor;
  *
  * @param <V> value
  */
-public class RedissonSetReactive<V> extends RedissonExpirableReactive implements RSetReactive<V> {
+public class RedissonSetReactive<V> {
 
-    private final RedissonSet<V> instance;
+    private final RSet<V> instance;
+    private final RedissonReactiveClient redisson;
 
-    public RedissonSetReactive(CommandReactiveExecutor commandExecutor, String name) {
-        super(commandExecutor, name);
-        instance = new RedissonSet<V>(commandExecutor.getConnectionManager().getCodec(), commandExecutor, name);
-    }
-
-    public RedissonSetReactive(Codec codec, CommandReactiveExecutor commandExecutor, String name) {
-        super(codec, commandExecutor, name);
-        instance = new RedissonSet<V>(codec, commandExecutor, name);
+    public RedissonSetReactive(RSet<V> instance, RedissonReactiveClient redisson) {
+        this.instance = instance;
+        this.redisson = redisson;
     }
 
-    @Override
-    public Publisher<Long> addAll(Publisher<? extends V> c) {
-        return new PublisherAdder<V>(this).addAll(c);
-    }
-
-    @Override
-    public Publisher<Long> size() {
-        return commandExecutor.readReactive(getName(), codec, RedisCommands.SCARD, getName());
-    }
-
-    @Override
-    public Publisher<Boolean> contains(Object o) {
-        return reactive(instance.containsAsync(o));
-    }
-
-    private Publisher<ListScanResult<V>> scanIteratorReactive(InetSocketAddress client, long startPos) {
-        return commandExecutor.readReactive(client, getName(), codec, RedisCommands.SSCAN, getName(), startPos);
-    }
-
-    @Override
-    public Publisher<Long> add(V e) {
-        return commandExecutor.writeReactive(getName(), codec, RedisCommands.SADD, getName(), e);
-    }
-
-    @Override
-    public Publisher<V> removeRandom() {
-        return reactive(instance.removeRandomAsync());
-    }
-
-    @Override
-    public Publisher<V> random() {
-        return reactive(instance.randomAsync());
-    }
-
-    @Override
-    public Publisher<Boolean> remove(Object o) {
-        return reactive(instance.removeAsync(o));
-    }
-
-    @Override
-    public Publisher<Boolean> move(String destination, V member) {
-        return reactive(instance.moveAsync(destination, member));
-    }
-
-    @Override
-    public Publisher<Boolean> containsAll(Collection<?> c) {
-        return reactive(instance.containsAllAsync(c));
-    }
-
-    @Override
-    public Publisher<Long> addAll(Collection<? extends V> c) {
-        List<Object> args = new ArrayList<Object>(c.size() + 1);
-        args.add(getName());
-        args.addAll(c);
-        return commandExecutor.writeReactive(getName(), codec, RedisCommands.SADD, args.toArray());
-    }
-
-    @Override
-    public Publisher<Boolean> retainAll(Collection<?> c) {
-        return reactive(instance.retainAllAsync(c));
-    }
-
-    @Override
-    public Publisher<Boolean> removeAll(Collection<?> c) {
-        return reactive(instance.removeAllAsync(c));
-    }
-
-    @Override
-    public Publisher<Set<V>> readIntersection(String... names) {
-        return reactive(instance.readIntersectionAsync(names));
-    }
-    
-    @Override
-    public Publisher<Long> intersection(String... names) {
-        List<Object> args = new ArrayList<Object>(names.length + 1);
-        args.add(getName());
-        args.addAll(Arrays.asList(names));
-        return commandExecutor.writeReactive(getName(), codec, RedisCommands.SINTERSTORE, args.toArray());
-    }
-    
-    @Override
-    public Publisher<Long> diff(String... names) {
-        List<Object> args = new ArrayList<Object>(names.length + 1);
-        args.add(getName());
-        args.addAll(Arrays.asList(names));
-        return commandExecutor.writeReactive(getName(), codec, RedisCommands.SDIFFSTORE, args.toArray());
-    }
-    
-    @Override
-    public Publisher<Long> union(String... names) {
-        List<Object> args = new ArrayList<Object>(names.length + 1);
-        args.add(getName());
-        args.addAll(Arrays.asList(names));
-        return commandExecutor.writeReactive(getName(), codec, RedisCommands.SUNIONSTORE, args.toArray());
-    }
-
-    @Override
-    public Publisher<Set<V>> readUnion(String... names) {
-        return reactive(instance.readUnionAsync(names));
-    }
-
-    @Override
-    public Publisher<V> iterator() {
-        return new SetReactiveIterator<V>() {
+    public Publisher<Boolean> addAll(Publisher<? extends V> c) {
+        return new PublisherAdder<Object>() {
             @Override
-            protected Publisher<ListScanResult<V>> scanIteratorReactive(InetSocketAddress client, long nextIterPos) {
-                return RedissonSetReactive.this.scanIteratorReactive(client, nextIterPos);
+            public RFuture<Boolean> add(Object e) {
+                return instance.addAsync((V) e);
             }
-        };
+        }.addAll(c);
     }
 
+    public Publisher<V> iterator(int count) {
+        return iterator(null, count);
+    }
+    
+    public Publisher<V> iterator(String pattern) {
+        return iterator(pattern, 10);
+    }
+
+    public Publisher<V> iterator(String pattern, int count) {
+        return Flux.create(new SetReactiveIterator<V>() {
+            @Override
+            protected RFuture<ListScanResult<Object>> scanIterator(RedisClient client, long nextIterPos) {
+                return ((RedissonSet) instance).scanIteratorAsync(instance.getName(), client, nextIterPos, pattern, count);
+            }
+        });
+    }
+
+    public Publisher<V> iterator() {
+        return iterator(null, 10);
+}
+    
+    public RPermitExpirableSemaphoreReactive getPermitExpirableSemaphore(V value) {
+        String name = ((RedissonSet<V>) instance).getLockByValue(value, "permitexpirablesemaphore");
+        return redisson.getPermitExpirableSemaphore(name);
+    }
+
+    public RSemaphoreReactive getSemaphore(V value) {
+        String name = ((RedissonSet<V>) instance).getLockByValue(value, "semaphore");
+        return redisson.getSemaphore(name);
+    }
+    
+    public RLockReactive getFairLock(V value) {
+        String name = ((RedissonSet<V>) instance).getLockByValue(value, "fairlock");
+        return redisson.getFairLock(name);
+    }
+    
+    public RReadWriteLockReactive getReadWriteLock(V value) {
+        String name = ((RedissonSet<V>) instance).getLockByValue(value, "rw_lock");
+        return redisson.getReadWriteLock(name);
+    }
+    
+    public RLockReactive getLock(V value) {
+        String name = ((RedissonSet<V>) instance).getLockByValue(value, "lock");
+        return redisson.getLock(name);
+    }
+    
 }

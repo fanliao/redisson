@@ -1,8 +1,8 @@
 package org.redisson;
 
+import static org.assertj.core.api.Assertions.assertThat;
+
 import java.util.Arrays;
-import java.util.Iterator;
-import static org.assertj.core.api.Assertions.*;
 
 import org.junit.Assert;
 import org.junit.Test;
@@ -121,7 +121,7 @@ public class RedissonDequeReactiveTest extends BaseReactiveTest {
         final RDequeReactive<Integer> queue = redisson.getDeque("deque");
         sync(queue.addAll(Arrays.asList(1, 2, 3)));
 
-        assertThat(toIterator(queue.descendingIterator())).containsExactly(3, 2, 1);
+        assertThat(toIterator(queue.descendingIterator())).toIterable().containsExactly(3, 2, 1);
     }
 
 }

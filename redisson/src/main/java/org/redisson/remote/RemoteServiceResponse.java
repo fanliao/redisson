@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,16 +28,24 @@ public class RemoteServiceResponse implements RRemoteServiceResponse, Serializab
     
     private Object result;
     private Throwable error;
+    private String id;
     
     public RemoteServiceResponse() {
     }
     
-    public RemoteServiceResponse(Object result) {
+    public RemoteServiceResponse(String id, Object result) {
         this.result = result;
+        this.id = id;
     }
 
-    public RemoteServiceResponse(Throwable error) {
+    public RemoteServiceResponse(String id, Throwable error) {
         this.error = error;
+        this.id = id;
+    }
+    
+    @Override
+    public String getId() {
+        return id;
     }
 
     public Throwable getError() {

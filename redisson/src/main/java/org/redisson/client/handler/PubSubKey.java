@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,18 +15,25 @@
  */
 package org.redisson.client.handler;
 
+import org.redisson.client.ChannelName;
+
+/**
+ * 
+ * @author Nikita Koksharov
+ *
+ */
 public class PubSubKey {
 
-    private final String channel;
+    private final ChannelName channel;
     private final String operation;
     
-    public PubSubKey(String channel, String operation) {
+    public PubSubKey(ChannelName channel, String operation) {
         super();
         this.channel = channel;
         this.operation = operation;
     }
     
-    public String getChannel() {
+    public ChannelName getChannel() {
         return channel;
     }
     
@@ -35,6 +42,7 @@ public class PubSubKey {
     }
 
     @Override
+    @SuppressWarnings("AvoidInlineConditionals")
     public int hashCode() {
         final int prime = 31;
         int result = 1;

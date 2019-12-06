@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,10 +20,16 @@ import java.util.List;
 import org.redisson.client.handler.State;
 import org.redisson.client.protocol.Decoder;
 
-public interface MultiDecoder<T> extends Decoder<Object> {
+/**
+ * 
+ * @author Nikita Koksharov
+ *
+ * @param <T> type
+ */
+public interface MultiDecoder<T> {
 
-    boolean isApplicable(int paramNum, State state);
-
+    Decoder<Object> getDecoder(int paramNum, State state);
+    
     T decode(List<Object> parts, State state);
 
 }

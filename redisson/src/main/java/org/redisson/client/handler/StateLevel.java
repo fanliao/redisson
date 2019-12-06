@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,10 +17,15 @@ package org.redisson.client.handler;
 
 import java.util.List;
 
+/**
+ * 
+ * @author Nikita Koksharov
+ *
+ */
 public class StateLevel {
 
-    private long size;
-    private List<Object> parts;
+    private final long size;
+    private final List<Object> parts;
 
     public StateLevel(long size, List<Object> parts) {
         super();
@@ -28,6 +33,10 @@ public class StateLevel {
         this.parts = parts;
     }
 
+    public boolean isFull() {
+        return size == parts.size();
+    }
+    
     public long getSize() {
         return size;
     }

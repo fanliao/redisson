@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,9 +15,8 @@
  */
 package org.redisson.connection.balancer;
 
-import java.security.SecureRandom;
 import java.util.List;
-import java.util.Random;
+import java.util.concurrent.ThreadLocalRandom;
 
 import org.redisson.connection.ClientConnectionsEntry;
 
@@ -28,10 +27,9 @@ import org.redisson.connection.ClientConnectionsEntry;
  */
 public class RandomLoadBalancer implements LoadBalancer {
 
-    private final Random random = new SecureRandom();
-
+    @Override
     public ClientConnectionsEntry getEntry(List<ClientConnectionsEntry> clientsCopy) {
-        int ind = random.nextInt(clientsCopy.size());
+        int ind = ThreadLocalRandom.current().nextInt(clientsCopy.size());
         return clientsCopy.get(ind);
     }
 

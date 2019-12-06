@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,154 +15,78 @@
  */
 package org.redisson.reactive;
 
-import java.io.IOException;
-import java.net.InetSocketAddress;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Collection;
-import java.util.List;
-import java.util.concurrent.TimeUnit;
-
 import org.reactivestreams.Publisher;
-import org.redisson.EvictionScheduler;
 import org.redisson.RedissonSetCache;
-import org.redisson.api.RSetCacheReactive;
-import org.redisson.client.codec.Codec;
-import org.redisson.client.protocol.RedisCommands;
+import org.redisson.ScanIterator;
+import org.redisson.api.RFuture;
+import org.redisson.api.RLockReactive;
+import org.redisson.api.RPermitExpirableSemaphoreReactive;
+import org.redisson.api.RReadWriteLockReactive;
+import org.redisson.api.RSemaphoreReactive;
+import org.redisson.api.RSetCache;
+import org.redisson.api.RedissonReactiveClient;
+import org.redisson.client.RedisClient;
 import org.redisson.client.protocol.decoder.ListScanResult;
-import org.redisson.command.CommandReactiveExecutor;
+
+import reactor.core.publisher.Flux;
 
 /**
- * <p>Set-based cache with ability to set TTL for each entry via
- * {@link #add(Object, long, TimeUnit)} method.
- * And therefore has an complex lua-scripts inside.
- * Uses map(value_hash, value) to tie with sorted set which contains expiration record for every value with TTL.
- * </p>
- *
- * <p>Current Redis implementation doesn't have set entry eviction functionality.
- * Thus values are checked for TTL expiration during any value read operation.
- * If entry expired then it doesn't returns and clean task runs hronous.
- * Clean task deletes removes 100 expired entries at once.
- * In addition there is {@link org.redisson.EvictionScheduler}. This scheduler
- * deletes expired entries in time interval between 5 seconds to 2 hours.</p>
- *
- * <p>If eviction is not required then it's better to use {@link org.redisson.api.RSet}.</p>
- *
+ * 
  * @author Nikita Koksharov
  *
  * @param <V> value
  */
-public class RedissonSetCacheReactive<V> extends RedissonExpirableReactive implements RSetCacheReactive<V> {
+public class RedissonSetCacheReactive<V> {
 
-    private final RedissonSetCache<V> instance;
+    private final RSetCache<V> instance;
+    private final RedissonReactiveClient redisson;
     
-    public RedissonSetCacheReactive(EvictionScheduler evictionScheduler, CommandReactiveExecutor commandExecutor, String name) {
-        super(commandExecutor, name);
-        instance = new RedissonSetCache<V>(evictionScheduler, commandExecutor, name);
+    public RedissonSetCacheReactive(RSetCache<V> instance, RedissonReactiveClient redisson) {
+        this.instance = instance;
+        this.redisson = redisson;
     }
 
-    public RedissonSetCacheReactive(Codec codec, EvictionScheduler evictionScheduler, CommandReactiveExecutor commandExecutor, String name) {
-        super(codec, commandExecutor, name);
-        instance = new RedissonSetCache<V>(codec, evictionScheduler, commandExecutor, name);
-    }
-
-    @Override
-    public Publisher<Long> size() {
-        return commandExecutor.readReactive(getName(), codec, RedisCommands.ZCARD, getName());
-    }
-
-    @Override
-    public Publisher<Boolean> contains(Object o) {
-        return reactive(instance.containsAsync(o));
-    }
-
-    Publisher<ListScanResult<V>> scanIterator(InetSocketAddress client, long startPos) {
-        return reactive(instance.scanIteratorAsync(client, startPos));
-    }
-
-    @Override
     public Publisher<V> iterator() {
-        return new SetReactiveIterator<V>() {
+        return Flux.create(new SetReactiveIterator<V>() {
             @Override
-            protected Publisher<ListScanResult<V>> scanIteratorReactive(InetSocketAddress client, long nextIterPos) {
-                return RedissonSetCacheReactive.this.scanIterator(client, nextIterPos);
+            protected RFuture<ListScanResult<Object>> scanIterator(RedisClient client, long nextIterPos) {
+                return ((ScanIterator) instance).scanIteratorAsync(instance.getName(), client, nextIterPos, null, 10);
             }
-        };
+        });
     }
 
-    @Override
-    public Publisher<Boolean> add(V value, long ttl, TimeUnit unit) {
-        return reactive(instance.addAsync(value, ttl, unit));
-    }
-
-    private byte[] encode(V value) throws IOException {
-        return codec.getValueEncoder().encode(value);
-    }
-
-    @Override
-    public Publisher<Long> add(V value) {
-        try {
-            byte[] objectState = encode(value);
-
-            long timeoutDate = 92233720368547758L;
-            return commandExecutor.evalWriteReactive(getName(), codec, RedisCommands.EVAL_LONG,
-                    "local expireDateScore = redis.call('zscore', KEYS[1], ARGV[3]); "
-                    + "if expireDateScore ~= false and tonumber(expireDateScore) > tonumber(ARGV[1]) then "
-                        + "return 0;"
-                    + "end; " +
-                    "redis.call('zadd', KEYS[1], ARGV[2], ARGV[3]); " +
-                    "return 1; ",
-                    Arrays.<Object>asList(getName()), System.currentTimeMillis(), timeoutDate, objectState);
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-    }
-
-    @Override
-    public Publisher<Boolean> remove(Object o) {
-        return reactive(instance.removeAsync(o));
-    }
-
-    @Override
-    public Publisher<Boolean> containsAll(Collection<?> c) {
-        return reactive(instance.containsAllAsync(c));
-    }
-
-    @Override
-    public Publisher<Long> addAll(Collection<? extends V> c) {
-        if (c.isEmpty()) {
-            return newSucceeded(0L);
-        }
-
-        long score = 92233720368547758L - System.currentTimeMillis();
-        List<Object> params = new ArrayList<Object>(c.size()*2 + 1);
-        params.add(getName());
-        try {
-            for (V value : c) {
-                byte[] objectState = encode(value);
-                params.add(score);
-                params.add(objectState);
+    public Publisher<Boolean> addAll(Publisher<? extends V> c) {
+        return new PublisherAdder<V>() {
+            @Override
+            public RFuture<Boolean> add(Object o) {
+                return instance.addAsync((V) o);
             }
-        } catch (IOException e) {
-            throw new RuntimeException(e);
-        }
-
-        return commandExecutor.writeReactive(getName(), codec, RedisCommands.ZADD_RAW, params.toArray());
+        }.addAll(c);
+    }
+    
+    public RPermitExpirableSemaphoreReactive getPermitExpirableSemaphore(V value) {
+        String name = ((RedissonSetCache<V>) instance).getLockByValue(value, "permitexpirablesemaphore");
+        return redisson.getPermitExpirableSemaphore(name);
     }
 
-    @Override
-    public Publisher<Boolean> retainAll(Collection<?> c) {
-        return reactive(instance.retainAllAsync(c));
+    public RSemaphoreReactive getSemaphore(V value) {
+        String name = ((RedissonSetCache<V>) instance).getLockByValue(value, "semaphore");
+        return redisson.getSemaphore(name);
     }
-
-    @Override
-    public Publisher<Boolean> removeAll(Collection<?> c) {
-        return reactive(instance.removeAllAsync(c));
+    
+    public RLockReactive getFairLock(V value) {
+        String name = ((RedissonSetCache<V>) instance).getLockByValue(value, "fairlock");
+        return redisson.getFairLock(name);
     }
-
-    @Override
-    public Publisher<Long> addAll(Publisher<? extends V> c) {
-        return new PublisherAdder<V>(this).addAll(c);
+    
+    public RReadWriteLockReactive getReadWriteLock(V value) {
+        String name = ((RedissonSetCache<V>) instance).getLockByValue(value, "rw_lock");
+        return redisson.getReadWriteLock(name);
+    }
+    
+    public RLockReactive getLock(V value) {
+        String name = ((RedissonSetCache<V>) instance).getLockByValue(value, "lock");
+        return redisson.getLock(name);
     }
 
 }

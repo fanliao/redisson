@@ -2,30 +2,74 @@ package org.redisson;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.Future;
 
 import org.junit.Assert;
 import org.junit.Test;
 import org.redisson.api.RFuture;
+import org.redisson.api.RLexSortedSet;
 import org.redisson.api.RScript;
 import org.redisson.api.RScript.Mode;
 import org.redisson.client.RedisException;
+import org.redisson.client.codec.StringCodec;
 
 public class RedissonScriptTest extends BaseTest {
 
     @Test
+    public void testMulti() throws InterruptedException, ExecutionException {
+        RLexSortedSet idx2 = redisson.getLexSortedSet("ABCD17436");
+        
+        Long l = new Long("1506524856000");
+        for (int i = 0; i < 100; i++) {
+            String s = "DENY" + "\t" + "TESTREDISSON" + "\t"
+                    + Long.valueOf(l) + "\t" + "helloworld_hongqin";
+            idx2.add(s);
+            l = l + 1;
+        }
+
+        String max = "'[DENY" + "\t" + "TESTREDISSON" + "\t" + "1506524856099'";
+        String min = "'[DENY" + "\t" + "TESTREDISSON" + "\t" + "1506524856000'";
+         String luaScript1= "local d = {}; d[1] = redis.call('zrevrangebylex','ABCD17436'," +max+","+min+",'LIMIT',0,5); ";
+         luaScript1=  luaScript1 + " d[2] = redis.call('zrevrangebylex','ABCD17436'," +max+","+min+",'LIMIT',0,15); ";
+         luaScript1=  luaScript1 + " d[3] = redis.call('zrevrangebylex','ABCD17436'," +max+","+min+",'LIMIT',0,25); ";
+         luaScript1 = luaScript1 + " return d;";
+     
+         List<List<Object>> objs = redisson.getScript(StringCodec.INSTANCE).eval(RScript.Mode.READ_ONLY,
+                luaScript1,
+                RScript.ReturnType.MULTI, Collections.emptyList());            
+        
+        assertThat(objs).hasSize(3);
+        assertThat(objs.get(0)).hasSize(5);
+        assertThat(objs.get(1)).hasSize(15);
+        assertThat(objs.get(2)).hasSize(25);
+    }
+    
+    @Test
     public void testEval() {
-        RScript script = redisson.getScript();
-        List<Object> res = script.eval(RScript.Mode.READ_ONLY, "return {1,2,3.3333,'\"foo\"',nil,'bar'}", RScript.ReturnType.MULTI, Collections.emptyList());
-        assertThat(res).containsExactly(1L, 2L, 3L, "foo");
+        RScript script = redisson.getScript(StringCodec.INSTANCE);
+        List<Object> res = script.eval(RScript.Mode.READ_ONLY, "return {'1','2','3.3333','foo',nil,'bar'}", RScript.ReturnType.MULTI, Collections.emptyList());
+        assertThat(res).containsExactly("1", "2", "3.3333", "foo");
     }
 
     @Test
     public void testEvalAsync() {
+        RScript script = redisson.getScript(StringCodec.INSTANCE);
+        RFuture<List<Object>> res = script.evalAsync(RScript.Mode.READ_ONLY, "return {'1','2','3.3333','foo',nil,'bar'}", RScript.ReturnType.MULTI, Collections.emptyList());
+        assertThat(res.awaitUninterruptibly().getNow()).containsExactly("1", "2", "3.3333", "foo");
+    }
+    
+    @Test
+    public void testScriptEncoding() {
         RScript script = redisson.getScript();
-        RFuture<List<Object>> res = script.evalAsync(RScript.Mode.READ_ONLY, "return {1,2,3.3333,'\"foo\"',nil,'bar'}", RScript.ReturnType.MULTI, Collections.emptyList());
-        assertThat(res.awaitUninterruptibly().getNow()).containsExactly(1L, 2L, 3L, "foo");
+        String value = "test";
+        script.eval(RScript.Mode.READ_WRITE, "redis.call('set', KEYS[1], ARGV[1])", RScript.ReturnType.VALUE, Arrays.asList("foo"), value);
+
+        String val = script.eval(RScript.Mode.READ_WRITE, "return redis.call('get', KEYS[1])", RScript.ReturnType.VALUE, Arrays.asList("foo"));
+        Assert.assertEquals(value, val);
     }
 
     @Test

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,25 +15,19 @@
  */
 package org.redisson.reactive;
 
-import java.net.InetSocketAddress;
 import java.util.Map;
 import java.util.Map.Entry;
-import java.util.Set;
 
 import org.reactivestreams.Publisher;
 import org.redisson.RedissonMap;
-import org.redisson.api.RMapReactive;
-import org.redisson.client.codec.Codec;
-import org.redisson.client.codec.ScanCodec;
-import org.redisson.client.protocol.RedisCommands;
-import org.redisson.client.protocol.decoder.MapScanResult;
-import org.redisson.client.protocol.decoder.ScanObjectEntry;
-import org.redisson.command.CommandReactiveExecutor;
+import org.redisson.api.RLockReactive;
+import org.redisson.api.RMap;
+import org.redisson.api.RPermitExpirableSemaphoreReactive;
+import org.redisson.api.RReadWriteLockReactive;
+import org.redisson.api.RSemaphoreReactive;
+import org.redisson.api.RedissonReactiveClient;
 
-import reactor.fn.BiFunction;
-import reactor.fn.Function;
-import reactor.rx.Streams;
-
+import reactor.core.publisher.Flux;
 
 /**
  * Distributed and concurrent implementation of {@link java.util.concurrent.ConcurrentMap}
@@ -44,209 +38,97 @@ import reactor.rx.Streams;
  * @param <K> key
  * @param <V> value
  */
-public class RedissonMapReactive<K, V> extends RedissonExpirableReactive implements RMapReactive<K, V> {
+public class RedissonMapReactive<K, V> {
 
-    private final RedissonMap<K, V> instance;
+    private final RMap<K, V> instance;
+    private final RedissonReactiveClient redisson;
 
-    public RedissonMapReactive(CommandReactiveExecutor commandExecutor, String name) {
-        super(commandExecutor, name);
-        instance = new RedissonMap<K, V>(codec, commandExecutor, name);
+    public RedissonMapReactive(RMap<K, V> instance, RedissonReactiveClient redisson) {
+        this.instance = instance;
+        this.redisson = redisson;
     }
 
-    public RedissonMapReactive(Codec codec, CommandReactiveExecutor commandExecutor, String name) {
-        super(codec, commandExecutor, name);
-        instance = new RedissonMap<K, V>(codec, commandExecutor, name);
-    }
-
-    @Override
-    public Publisher<Integer> size() {
-        return reactive(instance.sizeAsync());
-    }
-
-    @Override
-    public Publisher<Boolean> containsKey(Object key) {
-        return reactive(instance.containsKeyAsync(key));
-    }
-
-    @Override
-    public Publisher<Boolean> containsValue(Object value) {
-        return reactive(instance.containsValueAsync(value));
-    }
-
-    @Override
-    public Publisher<Map<K, V>> getAll(Set<K> keys) {
-        return reactive(instance.getAllAsync(keys));
-    }
-
-    @Override
-    public Publisher<Void> putAll(Map<? extends K, ? extends V> map) {
-        return reactive(instance.putAllAsync(map));
-    }
-
-    @Override
-    public Publisher<V> putIfAbsent(K key, V value) {
-        return reactive(instance.putIfAbsentAsync(key, value));
-    }
-
-    @Override
-    public Publisher<Boolean> remove(Object key, Object value) {
-        return reactive(instance.removeAsync(key, value));
-    }
-
-    @Override
-    public Publisher<Boolean> replace(K key, V oldValue, V newValue) {
-        return reactive(instance.replaceAsync(key, oldValue, newValue));
-    }
-
-    @Override
-    public Publisher<V> replace(K key, V value) {
-        return reactive(instance.replaceAsync(key, value));
-    }
-
-    @Override
-    public Publisher<V> get(K key) {
-        return reactive(instance.getAsync(key));
-    }
-
-    @Override
-    public Publisher<V> put(K key, V value) {
-        return reactive(instance.putAsync(key, value));
-    }
-
-
-    @Override
-    public Publisher<V> remove(K key) {
-        return reactive(instance.removeAsync(key));
-    }
-
-    @Override
-    public Publisher<Boolean> fastPut(K key, V value) {
-        return reactive(instance.fastPutAsync(key, value));
-    }
-
-    @Override
-    public Publisher<Long> fastRemove(K ... keys) {
-        return reactive(instance.fastRemoveAsync(keys));
-    }
-
-    Publisher<MapScanResult<ScanObjectEntry, ScanObjectEntry>> scanIteratorReactive(InetSocketAddress client, long startPos) {
-        return commandExecutor.readReactive(client, getName(), new ScanCodec(codec), RedisCommands.HSCAN, getName(), startPos);
-    }
-
-    @Override
     public Publisher<Map.Entry<K, V>> entryIterator() {
-        return new RedissonMapReactiveIterator<K, V, Map.Entry<K, V>>(this).stream();
+        return entryIterator(null);
+    }
+    
+    public Publisher<Entry<K, V>> entryIterator(int count) {
+        return entryIterator(null, count);
+    }
+    
+    public Publisher<Entry<K, V>> entryIterator(String pattern) {
+        return entryIterator(pattern, 10);
+    }
+    
+    public Publisher<Map.Entry<K, V>> entryIterator(String pattern, int count) {
+        return Flux.create(new MapReactiveIterator<K, V, Map.Entry<K, V>>((RedissonMap<K, V>) instance, pattern, count));
     }
 
-    @Override
     public Publisher<V> valueIterator() {
-        return new RedissonMapReactiveIterator<K, V, V>(this) {
-            @Override
-            V getValue(Entry<ScanObjectEntry, ScanObjectEntry> entry) {
-                return (V) entry.getValue().getObj();
-            }
-        }.stream();
+        return valueIterator(null);
     }
 
-    @Override
+    public Publisher<V> valueIterator(String pattern) {
+        return valueIterator(pattern, 10);
+    }
+
+    public Publisher<V> valueIterator(int count) {
+        return valueIterator(null, count);
+    }
+    
+    public Publisher<V> valueIterator(String pattern, int count) {
+        return Flux.create(new MapReactiveIterator<K, V, V>((RedissonMap<K, V>) instance, pattern, count) {
+            @Override
+            V getValue(Entry<Object, Object> entry) {
+                return (V) entry.getValue();
+            }
+        });
+    }
+
     public Publisher<K> keyIterator() {
-        return new RedissonMapReactiveIterator<K, V, K>(this) {
+        return keyIterator(null);
+    }
+
+    public Publisher<K> keyIterator(String pattern) {
+        return keyIterator(pattern, 10);
+    }
+
+    public Publisher<K> keyIterator(int count) {
+        return keyIterator(null, count);
+    }
+    
+    public Publisher<K> keyIterator(String pattern, int count) {
+        return Flux.create(new MapReactiveIterator<K, V, K>((RedissonMap<K, V>) instance, pattern, count) {
             @Override
-            K getValue(Entry<ScanObjectEntry, ScanObjectEntry> entry) {
-                return (K) entry.getKey().getObj();
+            K getValue(Entry<Object, Object> entry) {
+                return (K) entry.getKey();
             }
-        }.stream();
+        });
+    }
+    
+    public RPermitExpirableSemaphoreReactive getPermitExpirableSemaphore(K key) {
+        String name = ((RedissonMap<K, V>) instance).getLockByMapKey(key, "permitexpirablesemaphore");
+        return redisson.getPermitExpirableSemaphore(name);
     }
 
-    @Override
-    public Publisher<V> addAndGet(K key, Number value) {
-        return reactive(instance.addAndGetAsync(key, value));
+    public RSemaphoreReactive getSemaphore(K key) {
+        String name = ((RedissonMap<K, V>) instance).getLockByMapKey(key, "semaphore");
+        return redisson.getSemaphore(name);
+    }
+    
+    public RLockReactive getFairLock(K key) {
+        String name = ((RedissonMap<K, V>) instance).getLockByMapKey(key, "fairlock");
+        return redisson.getFairLock(name);
+    }
+    
+    public RReadWriteLockReactive getReadWriteLock(K key) {
+        String name = ((RedissonMap<K, V>) instance).getLockByMapKey(key, "rw_lock");
+        return redisson.getReadWriteLock(name);
+    }
+    
+    public RLockReactive getLock(K key) {
+        String name = ((RedissonMap<K, V>) instance).getLockByMapKey(key, "lock");
+        return redisson.getLock(name);
     }
 
-    @Override
-    public boolean equals(Object o) {
-        if (o == this)
-            return true;
-
-        if (o instanceof Map) {
-            final Map<?,?> m = (Map<?,?>) o;
-            if (m.size() != Streams.create(size()).next().poll()) {
-                return false;
             }
-
-            return Streams.create(entryIterator()).map(mapFunction(m)).reduce(true, booleanAnd()).next().poll();
-        } else if (o instanceof RMapReactive) {
-            final RMapReactive<Object, Object> m = (RMapReactive<Object, Object>) o;
-            if (Streams.create(m.size()).next().poll() != Streams.create(size()).next().poll()) {
-                return false;
-            }
-
-            return Streams.create(entryIterator()).map(mapFunction(m)).reduce(true, booleanAnd()).next().poll();
-        }
-
-        return true;
-    }
-
-    private BiFunction<Boolean, Boolean, Boolean> booleanAnd() {
-        return new BiFunction<Boolean, Boolean, Boolean>() {
-
-            @Override
-            public Boolean apply(Boolean t, Boolean u) {
-                return t & u;
-            }
-        };
-    }
-
-    private Function<Entry<K, V>, Boolean> mapFunction(final Map<?, ?> m) {
-        return new Function<Map.Entry<K, V>, Boolean>() {
-            @Override
-            public Boolean apply(Entry<K, V> e) {
-                K key = e.getKey();
-                V value = e.getValue();
-                if (value == null) {
-                    if (!(m.get(key)==null && m.containsKey(key)))
-                        return false;
-                } else {
-                    if (!value.equals(m.get(key)))
-                        return false;
-                }
-                return true;
-            }
-        };
-    }
-
-    private Function<Entry<K, V>, Boolean> mapFunction(final RMapReactive<Object, Object> m) {
-        return new Function<Map.Entry<K, V>, Boolean>() {
-            @Override
-            public Boolean apply(Entry<K, V> e) {
-                Object key = e.getKey();
-                Object value = e.getValue();
-                if (value == null) {
-                    if (!(Streams.create(m.get(key)).next().poll() ==null && Streams.create(m.containsKey(key)).next().poll()))
-                        return false;
-                } else {
-                    if (!value.equals(Streams.create(m.get(key)).next().poll()))
-                        return false;
-                }
-                return true;
-            }
-        };
-    }
-
-    @Override
-    public int hashCode() {
-        return Streams.create(entryIterator()).map(new Function<Map.Entry<K, V>, Integer>() {
-            @Override
-            public Integer apply(Entry<K, V> t) {
-                return t.hashCode();
-            }
-        }).reduce(0, new BiFunction<Integer, Integer, Integer>() {
-
-            @Override
-            public Integer apply(Integer t, Integer u) {
-                return t + u;
-            }
-        }).next().poll();
-    }
-
-}

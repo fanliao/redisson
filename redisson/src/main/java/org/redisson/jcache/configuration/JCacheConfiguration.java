@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -40,13 +40,13 @@ public class JCacheConfiguration<K, V> implements CompleteConfiguration<K, V> {
     private final MutableConfiguration<K, V> delegate;
     
     public JCacheConfiguration(Configuration<K, V> configuration) {
-        this(configuration, configuration.getKeyType(), configuration.getValueType());
-    }
-    
-    public JCacheConfiguration(Configuration<K, V> configuration, Class<K> keyType, Class<V> valueType) {
         if (configuration != null) {
+            if (configuration instanceof RedissonConfiguration) {
+                configuration = ((RedissonConfiguration<K, V>) configuration).getJcacheConfig();
+            }
+            
             if (configuration instanceof CompleteConfiguration) {
-                delegate = new MutableConfiguration<K, V>((CompleteConfiguration<K, V>)configuration);
+                delegate = new MutableConfiguration<K, V>((CompleteConfiguration<K, V>) configuration);
             } else {
                 delegate = new MutableConfiguration<K, V>();
                 delegate.setStoreByValue(configuration.isStoreByValue());

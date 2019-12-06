@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,21 +15,21 @@
  */
 package org.redisson.liveobject.resolver;
 
-import org.redisson.api.RedissonClient;
 import org.redisson.api.annotation.RId;
+import org.redisson.command.CommandAsyncExecutor;
 
 /**
  * 
  * @author Nikita Koksharov
  *
  */
-public class RequiredIdResolver implements RIdResolver<RId, Object> {
+public class RequiredIdResolver implements RIdResolver<Object> {
     
     public static final RequiredIdResolver INSTANCE = new RequiredIdResolver();
 
     @Override
-    public Object resolve(Class cls, RId annotation, String idFieldName, RedissonClient redisson) {
-        throw new IllegalArgumentException("id value not defined for instance of " + cls);
+    public Object resolve(Class<?> cls, RId annotation, String idFieldName, CommandAsyncExecutor commandAsyncExecutor) {
+        throw new IllegalArgumentException("id value is not defined for instance of " + cls);
     }
 
 }

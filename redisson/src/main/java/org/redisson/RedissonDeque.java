@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,18 +15,19 @@
  */
 package org.redisson;
 
+import java.util.Collections;
 import java.util.Iterator;
+import java.util.List;
 import java.util.NoSuchElementException;
 
 import org.redisson.api.RDeque;
 import org.redisson.api.RFuture;
+import org.redisson.api.RedissonClient;
 import org.redisson.client.codec.Codec;
 import org.redisson.client.protocol.RedisCommand;
-import org.redisson.client.protocol.RedisCommand.ValueType;
 import org.redisson.client.protocol.RedisCommands;
-import org.redisson.client.protocol.convertor.VoidReplayConvertor;
+import org.redisson.client.protocol.decoder.ListFirstObjectDecoder;
 import org.redisson.command.CommandAsyncExecutor;
-import org.redisson.connection.decoder.ListFirstObjectDecoder;
 
 /**
  * Distributed and concurrent implementation of {@link java.util.Queue}
@@ -37,16 +38,15 @@ import org.redisson.connection.decoder.ListFirstObjectDecoder;
  */
 public class RedissonDeque<V> extends RedissonQueue<V> implements RDeque<V> {
 
-    private static final RedisCommand<Void> RPUSH_VOID = new RedisCommand<Void>("RPUSH", new VoidReplayConvertor(), 2, ValueType.OBJECTS);
     private static final RedisCommand<Object> LRANGE_SINGLE = new RedisCommand<Object>("LRANGE", new ListFirstObjectDecoder());
 
 
-    protected RedissonDeque(CommandAsyncExecutor commandExecutor, String name) {
-        super(commandExecutor, name);
+    public RedissonDeque(CommandAsyncExecutor commandExecutor, String name, RedissonClient redisson) {
+        super(commandExecutor, name, redisson);
     }
 
-    public RedissonDeque(Codec codec, CommandAsyncExecutor commandExecutor, String name) {
-        super(codec, commandExecutor, name);
+    public RedissonDeque(Codec codec, CommandAsyncExecutor commandExecutor, String name, RedissonClient redisson) {
+        super(codec, commandExecutor, name, redisson);
     }
 
     @Override
@@ -56,7 +56,7 @@ public class RedissonDeque<V> extends RedissonQueue<V> implements RDeque<V> {
 
     @Override
     public RFuture<Void> addFirstAsync(V e) {
-        return commandExecutor.writeAsync(getName(), codec, RedisCommands.LPUSH_VOID, getName(), e);
+        return commandExecutor.writeAsync(getName(), codec, RedisCommands.LPUSH_VOID, getName(), encode(e));
     }
 
     @Override
@@ -66,7 +66,7 @@ public class RedissonDeque<V> extends RedissonQueue<V> implements RDeque<V> {
 
     @Override
     public RFuture<Void> addLastAsync(V e) {
-        return commandExecutor.writeAsync(getName(), codec, RPUSH_VOID, getName(), e);
+        return commandExecutor.writeAsync(getName(), codec, RedisCommands.RPUSH_VOID, getName(), encode(e));
     }
 
 
@@ -127,7 +127,7 @@ public class RedissonDeque<V> extends RedissonQueue<V> implements RDeque<V> {
 
     @Override
     public RFuture<Boolean> offerFirstAsync(V e) {
-        return commandExecutor.writeAsync(getName(), codec, RedisCommands.LPUSH_BOOLEAN, getName(), e);
+        return commandExecutor.writeAsync(getName(), codec, RedisCommands.LPUSH_BOOLEAN, getName(), encode(e));
     }
 
     @Override
@@ -171,10 +171,40 @@ public class RedissonDeque<V> extends RedissonQueue<V> implements RDeque<V> {
     }
 
     @Override
+    public RFuture<List<V>> pollFirstAsync(int limit) {
+        return pollAsync(limit);
+    }
+
+    @Override
+    public List<V> pollFirst(int limit) {
+        return poll(limit);
+    }
+
+    @Override
     public RFuture<V> pollLastAsync() {
         return commandExecutor.writeAsync(getName(), codec, RedisCommands.RPOP, getName());
     }
 
+    @Override
+    public List<V> pollLast(int limit) {
+        return get(pollLastAsync(limit));
+    }
+
+    @Override
+    public RFuture<List<V>> pollLastAsync(int limit) {
+        return commandExecutor.evalWriteAsync(getName(), codec, RedisCommands.EVAL_LIST,
+                   "local result = {};"
+                 + "for i = 1, ARGV[1], 1 do " +
+                       "local value = redis.call('rpop', KEYS[1]);" +
+                       "if value ~= false then " +
+                           "table.insert(result, value);" +
+                       "else " +
+                           "return result;" +
+                       "end;" +
+                   "end; " +
+                   "return result;",
+                Collections.singletonList(getName()), limit);
+    }
 
     @Override
     public V pollLast() {

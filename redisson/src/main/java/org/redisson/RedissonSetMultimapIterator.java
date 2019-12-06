@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ public class RedissonSetMultimapIterator<K, V, M> extends RedissonMultiMapIterat
 
     @Override
     protected Iterator<V> getIterator(String name) {
-        RedissonSet<V> set = new RedissonSet<V>(codec, commandExecutor, map.getValuesName(name));
+        RedissonSet<V> set = new RedissonSet<V>(codec, commandExecutor, map.getValuesName(name), null);
         return set.iterator();
     }
 

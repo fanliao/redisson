@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -29,10 +29,9 @@ import org.redisson.client.protocol.RedisCommand;
 import org.redisson.client.protocol.RedisCommands;
 import org.redisson.command.CommandAsyncExecutor;
 import org.redisson.misc.RPromise;
+import org.redisson.misc.RedissonPromise;
 
 import io.netty.buffer.ByteBuf;
-import io.netty.util.concurrent.Future;
-import io.netty.util.concurrent.FutureListener;
 
 /**
  * 
@@ -45,7 +44,7 @@ public class RedissonBinaryStream extends RedissonBucket<byte[]> implements RBin
         
         @Override
         public void write(int b) throws IOException {
-            writeBytes(new byte[] {(byte)b});
+            writeBytes(new byte[] {(byte) b});
         }
         
         private void writeBytes(byte[] bytes) {
@@ -66,10 +65,18 @@ public class RedissonBinaryStream extends RedissonBucket<byte[]> implements RBin
         
     }
     
-    class RedissonInputStream extends InputStream {
+    public class RedissonInputStream extends InputStream {
 
         private int index;
         private int mark;
+        
+        public void seek(long pos) {
+            if (pos >= 0 && pos < size()) {
+                index = (int) pos;
+            } else {
+                throw new IllegalStateException("size is " + size() + " but pos is " + pos);
+            }
+        }
         
         @Override
         public long skip(long n) throws IOException {
@@ -97,7 +104,7 @@ public class RedissonBinaryStream extends RedissonBucket<byte[]> implements RBin
         
         @Override
         public int available() throws IOException {
-            return (int)(size() - index);
+            return (int) (size() - index);
         }
         
         @Override
@@ -127,7 +134,7 @@ public class RedissonBinaryStream extends RedissonBucket<byte[]> implements RBin
                 throw new IndexOutOfBoundsException();
             }
             
-            return (Integer)get(commandExecutor.evalReadAsync(getName(), codec, new RedisCommand<Integer>("EVAL", new Decoder<Integer>() {
+            return (Integer) get(commandExecutor.evalReadAsync(getName(), codec, new RedisCommand<Integer>("EVAL", new Decoder<Integer>() {
                                 @Override
                                 public Integer decode(ByteBuf buf, State state) {
                                     if (buf.readableBytes() == 0) {
@@ -251,7 +258,7 @@ public class RedissonBinaryStream extends RedissonBucket<byte[]> implements RBin
     @Override
     public RFuture<Void> setAsync(byte[] value) {
         if (value.length > 512*1024*1024) {
-            RPromise<Void> result = newPromise();
+            RPromise<Void> result = new RedissonPromise<Void>();
             int chunkSize = 10*1024*1024;
             write(value, result, chunkSize, 0);
             return result;
@@ -263,26 +270,23 @@ public class RedissonBinaryStream extends RedissonBucket<byte[]> implements RBin
     private void write(final byte[] value, final RPromise<Void> result, final int chunkSize, final int i) {
         final int len = Math.min(value.length - i*chunkSize, chunkSize);
         byte[] bytes = Arrays.copyOfRange(value, i*chunkSize, i*chunkSize + len);
-        writeAsync(bytes).addListener(new FutureListener<Void>() {
-            @Override
-            public void operationComplete(Future<Void> future) throws Exception {
-                if (!future.isSuccess()) {
-                    result.tryFailure(future.cause());
-                    return;
-                }
-                
-                int j = i + 1;
-                if (j*chunkSize > value.length) {
-                    result.trySuccess(null);
-                } else {
-                    write(value, result, chunkSize, j);
-                }
+        writeAsync(bytes).onComplete((res, e) -> {
+            if (e != null) {
+                result.tryFailure(e);
+                return;
+            }
+            
+            int j = i + 1;
+            if (j*chunkSize > value.length) {
+                result.trySuccess(null);
+            } else {
+                write(value, result, chunkSize, j);
             }
         });
     }
     
     private String getPartsName() {
-        return getName() + ":parts";
+        return suffixName(getName(), "parts");
     }
     
     @Override

@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,7 +16,6 @@
 package org.redisson;
 
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 
 import org.redisson.api.RFuture;
@@ -29,7 +28,6 @@ import org.slf4j.LoggerFactory;
 
 import io.netty.util.Timeout;
 import io.netty.util.TimerTask;
-import io.netty.util.concurrent.FutureListener;
 
 /**
  * 
@@ -40,8 +38,29 @@ public abstract class QueueTransferTask {
     
     private static final Logger log = LoggerFactory.getLogger(QueueTransferTask.class);
 
+    public static class TimeoutTask {
+        
+        private final long startTime;
+        private final Timeout task;
+        
+        public TimeoutTask(long startTime, Timeout task) {
+            super();
+            this.startTime = startTime;
+            this.task = task;
+        }
+        
+        public long getStartTime() {
+            return startTime;
+        }
+        
+        public Timeout getTask() {
+            return task;
+        }
+        
+    }
+    
     private int usage = 1;
-    private final AtomicReference<Timeout> timeoutReference = new AtomicReference<Timeout>();
+    private final AtomicReference<TimeoutTask> lastTimeout = new AtomicReference<TimeoutTask>();
     private final ConnectionManager connectionManager;
     
     public QueueTransferTask(ConnectionManager connectionManager) {
@@ -62,7 +81,7 @@ public abstract class QueueTransferTask {
     private int statusListenerId;
     
     public void start() {
-        RTopic<Long> schedulerTopic = getTopic();
+        RTopic schedulerTopic = getTopic();
         statusListenerId = schedulerTopic.addListener(new BaseStatusListener() {
             @Override
             public void onSubscribe(String channel) {
@@ -70,29 +89,28 @@ public abstract class QueueTransferTask {
             }
         });
         
-        messageListenerId = schedulerTopic.addListener(new MessageListener<Long>() {
+        messageListenerId = schedulerTopic.addListener(Long.class, new MessageListener<Long>() {
             @Override
-            public void onMessage(String channel, Long startTime) {
+            public void onMessage(CharSequence channel, Long startTime) {
                 scheduleTask(startTime);
             }
         });
     }
     
     public void stop() {
-        RTopic<Long> schedulerTopic = getTopic();
+        RTopic schedulerTopic = getTopic();
         schedulerTopic.removeListener(messageListenerId);
         schedulerTopic.removeListener(statusListenerId);
     }
 
     private void scheduleTask(final Long startTime) {
+        TimeoutTask oldTimeout = lastTimeout.get();
         if (startTime == null) {
             return;
         }
         
-        Timeout oldTimeout = timeoutReference.get();
         if (oldTimeout != null) {
-            oldTimeout.cancel();
-            timeoutReference.compareAndSet(oldTimeout, null);
+            oldTimeout.getTask().cancel();
         }
         
         long delay = startTime - System.currentTimeMillis();
@@ -101,42 +119,41 @@ public abstract class QueueTransferTask {
                 @Override
                 public void run(Timeout timeout) throws Exception {
                     pushTask();
+                    
+                    TimeoutTask currentTimeout = lastTimeout.get();
+                    if (currentTimeout.getTask() == timeout) {
+                        lastTimeout.compareAndSet(currentTimeout, null);
+                    }
                 }
             }, delay, TimeUnit.MILLISECONDS);
-            timeoutReference.set(timeout);
+            if (!lastTimeout.compareAndSet(oldTimeout, new TimeoutTask(startTime, timeout))) {
+                timeout.cancel();
+            }
         } else {
             pushTask();
         }
     }
     
-    protected abstract RTopic<Long> getTopic();
+    protected abstract RTopic getTopic();
     
     protected abstract RFuture<Long> pushTaskAsync();
     
     private void pushTask() {
         RFuture<Long> startTimeFuture = pushTaskAsync();
-        addListener(startTimeFuture);
-    }
-
-    private void addListener(RFuture<Long> startTimeFuture) {
-        startTimeFuture.addListener(new FutureListener<Long>() {
-            @Override
-            public void operationComplete(io.netty.util.concurrent.Future<Long> future) throws Exception {
-                if (!future.isSuccess()) {
-                    if (future.cause() instanceof RedissonShutdownException) {
-                        return;
-                    }
-                    log.error(future.cause().getMessage(), future.cause());
-                    scheduleTask(System.currentTimeMillis() + 5 * 1000L);
+        startTimeFuture.onComplete((res, e) -> {
+            if (e != null) {
+                if (e instanceof RedissonShutdownException) {
                     return;
                 }
-                
-                if (future.getNow() != null) {
-                    scheduleTask(future.getNow());
-                }
+                log.error(e.getMessage(), e);
+                scheduleTask(System.currentTimeMillis() + 5 * 1000L);
+                return;
+            }
+            
+            if (res != null) {
+                scheduleTask(res);
             }
         });
     }
 
-    
 }

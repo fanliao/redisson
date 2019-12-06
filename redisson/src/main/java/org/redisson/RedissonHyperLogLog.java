@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -34,11 +34,11 @@ import org.redisson.command.CommandAsyncExecutor;
  */
 public class RedissonHyperLogLog<V> extends RedissonExpirable implements RHyperLogLog<V> {
 
-    protected RedissonHyperLogLog(CommandAsyncExecutor commandExecutor, String name) {
+    public RedissonHyperLogLog(CommandAsyncExecutor commandExecutor, String name) {
         super(commandExecutor, name);
     }
 
-    protected RedissonHyperLogLog(Codec codec, CommandAsyncExecutor commandExecutor, String name) {
+    public RedissonHyperLogLog(Codec codec, CommandAsyncExecutor commandExecutor, String name) {
         super(codec, commandExecutor, name);
     }
 
@@ -69,15 +69,15 @@ public class RedissonHyperLogLog<V> extends RedissonExpirable implements RHyperL
 
     @Override
     public RFuture<Boolean> addAsync(V obj) {
-        return commandExecutor.writeAsync(getName(), codec, RedisCommands.PFADD, getName(), obj);
+        return commandExecutor.writeAsync(getName(), codec, RedisCommands.PFADD, getName(), encode(obj));
     }
 
     @Override
     public RFuture<Boolean> addAllAsync(Collection<V> objects) {
         List<Object> args = new ArrayList<Object>(objects.size() + 1);
         args.add(getName());
-        args.addAll(objects);
-        return commandExecutor.writeAsync(getName(), codec, RedisCommands.PFADD, getName(), args.toArray());
+        encode(args, objects);
+        return commandExecutor.writeAsync(getName(), codec, RedisCommands.PFADD, args.toArray());
     }
 
     @Override

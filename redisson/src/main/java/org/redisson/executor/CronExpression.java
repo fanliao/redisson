@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
-
 /*
  * All content copyright Terracotta, Inc., unless otherwise indicated. All rights reserved.
  * 
@@ -51,6 +50,10 @@ import java.util.TreeSet;
  * @author Contributions from Mads Henderson
  * @author Refactoring from CronTrigger to CronExpression by Aaron Craven
  */
+@SuppressWarnings({"EmptyStatement", "InnerAssignment", "ConstantName", 
+    "BooleanExpressionComplexity", "NestedIfDepth", "ParenPad", 
+    "MethodLength", "WhitespaceAfter", "NoClone", "UnnecessaryParentheses", "AvoidInlineConditionals",
+    "EqualsAvoidNull", "OneStatementPerLine"})
 public final class CronExpression implements Serializable, Cloneable {
 
     private static final long serialVersionUID = 12423409423L;
@@ -112,9 +115,9 @@ public final class CronExpression implements Serializable, Cloneable {
     public static final int MAX_YEAR = Calendar.getInstance().get(Calendar.YEAR) + 100;
 
     /**
-     * Constructs a new <CODE>CronExpression</CODE> based on the specified 
+     * Constructs a new <CODE>CronExpression</CODE> based on the specified
      * parameter.
-     * 
+     *
      * @param cronExpression String representation of the cron expression the
      *                       new object should represent
      */
@@ -122,9 +125,9 @@ public final class CronExpression implements Serializable, Cloneable {
         if (cronExpression == null) {
             throw new IllegalArgumentException("cronExpression cannot be null");
         }
-        
+
         this.cronExpression = cronExpression.toUpperCase(Locale.US);
-        
+
         try {
             buildExpression(this.cronExpression);
         } catch (ParseException e) {
@@ -1500,6 +1503,7 @@ public final class CronExpression implements Serializable, Cloneable {
     }
 }
 
+@SuppressWarnings("VisibilityModifier")
 class ValueSet {
     public int value;
 

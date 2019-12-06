@@ -1,5 +1,5 @@
 /**
- * Copyright 2016 Nikita Koksharov
+ * Copyright (c) 2013-2019 Nikita Koksharov
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -58,6 +58,22 @@ import java.util.concurrent.TimeUnit;
 public interface RRemoteService {
 
     /**
+     * Returns free workers amount available for invocations 
+     * 
+     * @param remoteInterface - remote service interface
+     * @return workers amount
+     */
+    int getFreeWorkers(Class<?> remoteInterface);
+    
+    /**
+     * Returns pending invocations amount for handling in free workers.
+     * 
+     * @param remoteInterface - remote service interface
+     * @return invocations amount
+     */
+    int getPendingInvocations(Class<?> remoteInterface);
+    
+    /**
      * Register remote service with single worker
      *
      * @param <T> type of remote service
@@ -87,6 +103,14 @@ public interface RRemoteService {
      * @param executor - executor service
      */
     <T> void register(Class<T> remoteInterface, T object, int workers, ExecutorService executor);
+    
+    /**
+     * Deregister all workers for remote service
+     *
+     * @param <T> type of remote service
+     * @param remoteInterface - remote service interface
+     */
+    <T> void deregister(Class<T> remoteInterface);
     
     /**
      * Get remote service object for remote invocations.
